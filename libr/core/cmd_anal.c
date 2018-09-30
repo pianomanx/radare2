@@ -6731,7 +6731,7 @@ R_API int r_core_anal_refs(RCore *core, const char *input) {
 
 static const char *oldstr = NULL;
 
-static void rowlog(RCore *core, const char *str) {
+R_API void rowlog(RCore *core, const char *str) {
 	int use_color = core->print->flags & R_PRINT_FLAGS_COLOR;
 	bool verbose = r_config_get_i (core->config, "scr.prompt");
 	oldstr = str;
@@ -6745,7 +6745,7 @@ static void rowlog(RCore *core, const char *str) {
 	}
 }
 
-static void rowlog_done(RCore *core) {
+R_API void rowlog_done(RCore *core) {
 	int use_color = core->print->flags & R_PRINT_FLAGS_COLOR;
 	bool verbose = r_config_get_i (core->config, "scr.prompt");
 	if (verbose) {
@@ -7097,6 +7097,14 @@ static int cmd_anal_all(RCore *core, const char *input) {
 			}
 			r_cons_clear_line (1);
 			if (*input == 'a') { // "aaa"
+				if (r_str_startswith (r_config_get (core->config, "bin.lang"), "go")) {
+					rowlog (core, "Find function and symbol names from golang binaries (aang)");
+					rowlog_done (core);
+					r_core_anal_autoname_all_golang_fcns (core);
+					rowlog (core, "Analyze all flags starting with sym.go. (af @@ sym.go.*)");
+					r_core_cmd0 (core, "af @@ sym.go.*");
+					rowlog_done (core);
+				}
 				if (dh_orig && strcmp (dh_orig, "esil")) {
 					r_core_cmd0 (core, "dL esil");
 				}
