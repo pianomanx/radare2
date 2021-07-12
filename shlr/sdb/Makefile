@@ -4,6 +4,8 @@ VALADIR=bindings/vala
 PWD=$(shell pwd)
 PFX=${DESTDIR}${PREFIX}
 HGFILES=`find sdb-${SDBVER} -type f | grep -v hg | grep -v swp`
+ASANOPTS=address undefined signed-integer-overflow leak
+CFLAGS_ASAN=$(addprefix -fsanitize=,$(ASANOPTS))
 MKDIR=mkdir
 
 all: pkgconfig src/sdb_version.h
@@ -22,12 +24,23 @@ endif
 
 .PHONY: test sdb.js pkgconfig dist w32dista asan
 
+include wasi.mk
+
+wasi wasm: $(WASI_SDK)
+	${MAKE} src/sdb_version.h
+	CC=$(WASI_CC) CFLAGS="$(WASI_CFLAGS)" $(MAKE) -C src all WITHPIC=0
+	mv src/sdb src/sdb.wasm
+	file src/sdb.wasm
+
 test:
 	${MAKE} -C test
 
+asantest:
+	CC=gcc CFLAGS="$(CFLAGS_ASAN)" ${MAKE} -C test
+
 asan:
 	${MAKE} src/sdb_version.h
-	${MAKE} -C src CC="gcc -fsanitize=address" all
+	CC=gcc CFLAGS="$(CFLAGS_ASAN)" ${MAKE} -C src all
 
 pkgconfig:
 	[ -d pkgconfig ] && ${MAKE} -C pkgconfig || true

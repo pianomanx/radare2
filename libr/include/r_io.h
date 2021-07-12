@@ -52,6 +52,10 @@ typedef void * r_ptrace_data_t;
 #elif __APPLE__
 typedef int r_ptrace_request_t;
 typedef int r_ptrace_data_t;
+#elif __OpenBSD__
+typedef int r_ptrace_request_t;
+typedef int r_ptrace_data_t;
+#define R_PTRACE_NODATA 0
 #else
 typedef int r_ptrace_request_t;
 typedef void *r_ptrace_data_t;
@@ -118,6 +122,7 @@ typedef struct r_io_t {
 	ut64 mask;
 	RIOUndo undo;
 	SdbList *plugins;
+	bool nodup;
 	char *runprofile;
 	char *envprofile;
 	char *args;
@@ -169,7 +174,7 @@ typedef struct r_io_plugin_t {
 	RIODesc* (*open)(RIO *io, const char *, int perm, int mode);
 	RList* /*RIODesc* */ (*open_many)(RIO *io, const char *, int perm, int mode);
 	int (*read)(RIO *io, RIODesc *fd, ut8 *buf, int count);
-	ut64 (*lseek)(RIO *io, RIODesc *fd, ut64 offset, int whence);
+	ut64 (*seek)(RIO *io, RIODesc *fd, ut64 offset, int whence);
 	int (*write)(RIO *io, RIODesc *fd, const ut8 *buf, int count);
 	int (*close)(RIODesc *desc);
 	bool (*is_blockdevice)(RIODesc *desc);
@@ -511,7 +516,7 @@ extern RIOPlugin r_io_plugin_r2pipe;
 extern RIOPlugin r_io_plugin_r2web;
 extern RIOPlugin r_io_plugin_qnx;
 extern RIOPlugin r_io_plugin_r2k;
-extern RIOPlugin r_io_plugin_tcp;
+extern RIOPlugin r_io_plugin_tcpslurp;
 extern RIOPlugin r_io_plugin_bochs;
 extern RIOPlugin r_io_plugin_null;
 extern RIOPlugin r_io_plugin_ar;
@@ -519,6 +524,7 @@ extern RIOPlugin r_io_plugin_rbuf;
 extern RIOPlugin r_io_plugin_winedbg;
 extern RIOPlugin r_io_plugin_gprobe;
 extern RIOPlugin r_io_plugin_fd;
+extern RIOPlugin r_io_plugin_socket;
 
 #if __cplusplus
 }

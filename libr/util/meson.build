@@ -3,6 +3,7 @@ subdir('d')
 r_util_sources = [
   'ascii_table.c',
   'assert.c',
+  'w32.c',
   'alloc.c',
   'charset.c',
   'donut.c',
@@ -87,6 +88,10 @@ r_util_sources = [
   'regex/regexec.c',
   'regex/regerror.c'
 ]
+
+if get_option('sdb_cgen')
+  r_util_sources += r_util_d_sources
+endif
 
 r_util_deps = [ldl, mth, spp_dep, pth, utl, sdb_dep, zlib_dep, platform_deps]
 if host_machine.system().startswith('freebsd') or host_machine.system().startswith('netbsd') or host_machine.system().startswith('haiku')

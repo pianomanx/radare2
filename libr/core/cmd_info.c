@@ -252,6 +252,18 @@ static void r_core_file_info(RCore *core, PJ *pj, int mode) {
 				pj_ks (pj, "referer", desc->referer);
 			}
 		}
+		int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
+		if (v > 0) {
+			pj_ki (pj, "minopsz", v);
+		}
+		v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+		if (v > 0) {
+			pj_ki (pj, "maxopsz", v);
+		}
+		v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
+		if (v > 0) {
+			pj_ki (pj, "pcalign", v);
+		}
 		pj_ki (pj, "block", core->blocksize);
 		if (binfile) {
 			if (binfile->curxtr) {
@@ -281,6 +293,18 @@ static void r_core_file_info(RCore *core, PJ *pj, int mode) {
 				r_num_units (humansz, sizeof (humansz), fsz);
 				pair ("humansz", humansz);
 			}
+		}
+		int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
+		if (v > 0) {
+			pair ("minopsz", sdb_fmt ("%d", v));
+		}
+		v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+		if (v > 0) {
+			pair ("maxopsz", sdb_fmt ("%d", v));
+		}
+		v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
+		if (v > 0) {
+			pair ("pcalign", sdb_fmt ("%d", v));
 		}
 		if (desc) {
 			pair ("mode", r_str_rwx_i (desc->perm & R_PERM_RWX));
@@ -467,7 +491,7 @@ static int cmd_info(void *data, const char *input) {
 		if (!strncmp (input, "zzz", 3)) {
 			is_izzzj = true;
 		}
-		if (!strncmp(input, "dpi", 3)) {
+		if (!strncmp (input, "dpi", 3)) {
 			is_idpij = true;
 		}
 	}
@@ -732,7 +756,6 @@ static int cmd_info(void *data, const char *input) {
 				break;
 			}
 		case 'h': // "ih"
-			r_core_bin_export_info (core, R_MODE_SET);
 			RBININFO ("fields", R_CORE_BIN_ACC_FIELDS, NULL, 0);
 			break;
 		case 'l': { // "il"

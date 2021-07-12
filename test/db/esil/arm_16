@@ -162,6 +162,147 @@ EXPECT=<<EOF
 EOF
 RUN
 
+NAME=ldr r0, [r1, 6]!
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar > /dev/null
+ar r1=2
+wx 51f8060f
+wx aaaaaaaabbbbbbbb44332211@4
+aes
+ar r0
+ar r1
+EOF
+EXPECT=<<EOF
+0xbbbbbbbb
+0x00000008
+EOF
+RUN
+
+NAME=ldr r0, [r1], -4
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar > /dev/null
+ar r1=8
+wx 51f80409
+wx aaaaaaaabbbbbbbb44332211@4
+aes
+ar r0
+ar r1
+EOF
+EXPECT=<<EOF
+0xbbbbbbbb
+0x00000004
+EOF
+RUN
+
+NAME=ldrd r2, r3, [r1]
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar r1=8
+# put value at r1 into r2 and at r1+4 into r3
+wx d1e90023 # ldrd r2,r3,[r1]
+wx ddccbbaa @ 8
+wx efbeadde @ 12
+aes
+ar r2
+ar r3
+EOF
+EXPECT=<<EOF
+0xaabbccdd
+0xdeadbeef
+EOF
+RUN
+
+NAME=ldrd r2, r3, [r1, #4]
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar r1=4
+# put value at r1+4 into r2 and at r1+4+4 into r3
+wx d1e90123 # ldrd r2,r3,[r1, 4]
+wx ddccbbaa @ 8
+wx efbeadde @ 12
+aes
+ar r2
+ar r3
+EOF
+EXPECT=<<EOF
+0xaabbccdd
+0xdeadbeef
+EOF
+RUN
+
+NAME=ldrd r2, r3, [pc, #8]
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+# put value at pc+4 into r2 and at pc+4+4 into r3
+wx dfe90223 # ldrd r2, r3, [pc, #8]
+wx ddccbbaa @ 12
+wx efbeadde @ 16
+aes
+ar r2
+ar r3
+EOF
+EXPECT=<<EOF
+0xaabbccdd
+0xdeadbeef
+EOF
+RUN
+
+NAME=ldrd r2, r3, [r1, #4]!
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar r1=4
+# put value at r1+4 into r2 and at r1+4+4 into r3 then put r1+4 into r1
+wx f1e90123 # ldrd r2, r3, [r1, #4]!
+wx ddccbbaa @ 8
+wx efbeadde @ 12
+aes
+ar r1
+ar r2
+ar r3
+EOF
+EXPECT=<<EOF
+0x00000008
+0xaabbccdd
+0xdeadbeef
+EOF
+RUN
+
+NAME=ldrd r2, r3, [r1], #4
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=16
+ar r1=8
+# put value at r1 into r2 and at r1+4 into r3 then put r1+4 into r1
+wx f1e80123 # ldrd r2,r3,[r1], 4
+wx ddccbbaa @ 8
+wx efbeadde @ 12
+aes
+ar r1
+ar r2
+ar r3
+EOF
+EXPECT=<<EOF
+0x0000000c
+0xaabbccdd
+0xdeadbeef
+EOF
+RUN
+
 NAME=ldm r3!, {r1, r4, r5}
 FILE=malloc://0x200
 CMDS=<<EOF
@@ -910,31 +1051,31 @@ FILE=bins/elf/BLE_Beacon2.NRF51822_OTA.bin
 ARGS=-aarm -b16 -easm.os=s110 -m 0x16000
 CMDS=/ad svc
 EXPECT=<<EOF
-0x000168d0   # 2: svc 0x51
-0x000168f2   # 2: svc 0x61
-0x00016b42   # 2: svc 0x7f
-0x00016c1c   # 2: svc 0x7c
-0x00016c28   # 2: svc 0x78
-0x00016c32   # 2: svc 0x7a
-0x00016c3a   # 2: svc 0x77
-0x00016ce4   # 2: svc 0xa0
-0x00016ed6   # 2: svc 0xa9
-0x000171b2   # 2: svc 0x73
-0x00017212   # 2: svc 0x72
-0x0001721e   # 2: svc 0x78
-0x00017408   # 2: svc 0x40
-0x000177f6   # 2: svc 0x3c
-0x000177f8   # 2: svc 0x11
-0x00017820   # 2: svc 0x13
-0x0001785c   # 2: svc 0x60
-0x00017864   # 2: svc 0x71
-0x0001786c   # 2: svc 0x70
-0x0001794c   # 2: svc 0xa2
-0x0001799e   # 2: svc 0xa3
-0x00017a1a   # 2: svc 0x63
-0x00017d5e   # 2: svc 0x10
-0x00017d6a   # 2: svc 0x26
-0x00018660   # 2: svc 0xa4
+0x000168d0                 51df  svc 0x51
+0x000168f2                 61df  svc 0x61
+0x00016b42                 7fdf  svc 0x7f
+0x00016c1c                 7cdf  svc 0x7c
+0x00016c28                 78df  svc 0x78
+0x00016c32                 7adf  svc 0x7a
+0x00016c3a                 77df  svc 0x77
+0x00016ce4                 a0df  svc 0xa0
+0x00016ed6                 a9df  svc 0xa9
+0x000171b2                 73df  svc 0x73
+0x00017212                 72df  svc 0x72
+0x0001721e                 78df  svc 0x78
+0x00017408                 40df  svc 0x40
+0x000177f6                 3cdf  svc 0x3c
+0x000177f8                 11df  svc 0x11
+0x00017820                 13df  svc 0x13
+0x0001785c                 60df  svc 0x60
+0x00017864                 71df  svc 0x71
+0x0001786c                 70df  svc 0x70
+0x0001794c                 a2df  svc 0xa2
+0x0001799e                 a3df  svc 0xa3
+0x00017a1a                 63df  svc 0x63
+0x00017d5e                 10df  svc 0x10
+0x00017d6a                 26df  svc 0x26
+0x00018660                 a4df  svc 0xa4
 EOF
 RUN
 

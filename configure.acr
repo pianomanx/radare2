@@ -1,5 +1,5 @@
 PKGNAME radare2
-VERSION 5.2.1
+VERSION 5.4.0-git
 CONTACT pancake ; pancake@nopcode.org
 
 LANG_C!
@@ -13,6 +13,7 @@ USE_PKGCONFIG
 
 CHKPRG! PATCH patch
 CHKPRG GIT git
+CHKPRG GPERF gperf
 CHKLIB magic
 ARG_WITH USE_MAGIC sysmagic force to use system's magic ;
 IFAND HAVE_LIB_MAGIC USE_MAGIC {
@@ -23,7 +24,7 @@ IFAND HAVE_LIB_MAGIC USE_MAGIC {
 	LIBMAGIC = '' ;
 }
 
-ARG_WITH CSNEXT capstone5 build next branch of the capstone repository ;
+ARG_DISABLE WANT_THREADS threads disable use of thread apis ;
 
 (( useful for static builds . see sys/static.sh ))
 ARG_DISABLE LOADLIBS loadlibs disable loading plugins ;
@@ -31,8 +32,17 @@ ARG_DISABLE LOADLIBS loadlibs disable loading plugins ;
 ARG_WITHOUT WANT_DYLINK dylink disable support for dynamic loading of plugins ;
 ARG_WITHOUT HAVE_FORK fork disable fork ;
 ARG_WITHOUT WANT_PTRACE_WRAP ptrace-wrap build ptrace-wrap support needed for the iaito debugger on Linux ;
+ARG_WITHOUT WANT_GPERF gperf do not statically link the sdb databases even if gperf is found ;
+ARG_WITHOUT WANT_CAPSTONE capstone dont build the capstone dependency ;
+
+IFNOT WANT_GPERF {
+	HAVE_GPERF = 0 ;
+}
 
 ARG_WITH WITH_LIBR libr build libr.a and libr.dylib ;
+
+ARG_WITH USE_CS5 capstone5 build next branch of capstone5 (default) ;
+ARG_WITH USE_CS4 capstone4 build v4 branch of capstone ;
 
 ARG_WITH WITH_CAPSTONE syscapstone force to use system-wide capstone ;
 IF WITH_CAPSTONE {
@@ -88,15 +98,6 @@ IFNOT HAVE_CLOCK_GETTIME {
 }
 
 CHKFLG SUPPORT_GNU99 -std=gnu99 ;
-
-IF SUPPORT_GNU99 {
-	NEWSHELL_CFLAGS += '-std=gnu99' ;
-}{
-	CHKFLG SUPPORT_C99 -std=c99 ;
-	IF SUPPORT_C99 {
-		NEWSHELL_CFLAGS += '-std=c99' ;
-	}
-}
 
 (( TODO must deprecate
 CHKLIB gmp
@@ -163,6 +164,11 @@ IFEQ USEROSTYPE auto ; {
 	IFEQ HOST_OS linux ; {
 		USEROSTYPE = gnulinux ;
 	}{
+	IFEQ HOST_OS serenityos ; {
+		USEROSTYPE = serenityos ;
+		HAVE_LIB_DL = 1 ;
+		DL_LIBS = -ldl ;
+	}{
 	IFEQ HOST_OS gnu ; {
 		(( GNU / HURD ))
 		USEROSTYPE = gnulinux ;
@@ -189,7 +195,7 @@ IFEQ USEROSTYPE auto ; {
         }{
 	IFEQ HOST_OS haiku ; {
 		USEROSTYPE = haiku ;
-	} } } } } } } } } } } }
+	} } } } } } } } } } } } }
 }
 
 (( this hack is required for openbsd ports ))
@@ -245,7 +251,7 @@ ARG_WITH R_CHECKS_LEVEL=2 checks-level value between 0 and 3 to enable different
 REPORT R_CHECKS_LEVEL PREFIX HAVE_LIB_GMP HAVE_OPENSSL HAVE_LIBUV
 	USE_CAPSTONE HAVE_PTRACE USE_PTRACE_WRAP HAVE_FORK
 	VERSION USE_LIB_ZIP USE_LIB_MAGIC USE_LIB_XXHASH DEBUGGER
-	CC USERCC HAVE_ARC4RANDOM_UNIFORM PKGCONFIG
+	CC USERCC HAVE_ARC4RANDOM_UNIFORM PKGCONFIG HAVE_GPERF
 	HAVE_EXPLICIT_BZERO HAVE_EXPLICIT_MEMSET WANT_DYLINK USEROSTYPE
 	LIBVERSION BUILD HOST TARGET CFLAGS LDFLAGS ;
 

@@ -20,8 +20,7 @@ static const char *help_msg_w[] = {
 	"wA","[?] r 0","alter/modify opcode at current seek (see wA?)",
 	"wb"," 010203","fill current block with cyclic hexpairs",
 	"wB","[-]0xVALUE","set or unset bits with given value",
-	"wc","","list all write changes",
-	"wc","[?][jir+-*?]","write cache undo/commit/reset/list (io.cache)",
+	"wc","[?][jir+-*?]","write cache list/undo/commit/reset (io.cache)",
 	"wd"," [off] [n]","duplicate N bytes from offset at current seek (memcpy) (see y?)",
 	"we","[?] [nNsxX] [arg]","extend write operations (insert instead of replace)",
 	"wf","[fs] -|file","write contents of file at current offset",
@@ -44,6 +43,7 @@ static const char *help_msg_wa[] = {
 	"Usage:", "wa[of*] [arg]", "",
 	"wa", " nop", "write nopcode using asm.arch and asm.bits",
 	"wai", " jmp 0x8080", "write inside this op (fill with nops or error if doesnt fit)",
+	"wan", " jmp 0x8080", "write instruction(s) nopping the trailing bytes",
 	"wa*", " mov eax, 33", "show 'wx' op with hexpair bytes of assembled opcode",
 	"\"wa nop;nop\"", "" , "assemble more than one instruction (note the quotes)",
 	"waf", " f.asm" , "assemble file and write bytes",
@@ -74,6 +74,7 @@ static const char *help_msg_wc[] = {
 	"wc*","","\"\" in radare commands",
 	"wcr","","reset all write changes in cache",
 	"wci","","commit write cache",
+	"wcf"," [file]","commit write cache into given file",
 	"wcp"," [fd]", "list all cached write-operations on p-layer for specified fd or current fd",
 	"wcp*"," [fd]","list all cached write-operations on p-layer in radare commands",
 	"wcpi"," [fd]", "commit and invalidate pcache for specified fd or current fd",
@@ -178,7 +179,7 @@ static const char *help_msg_wx[] = {
 };
 
 static void cmd_write_fail(RCore *core) {
-	eprintf ("Failed to write\n");
+	eprintf ("ERROR: Cannot write in here, check map permissions or reopen the file with oo+\n");
 	core->num->value = 1;
 }
 
@@ -621,9 +622,8 @@ static RCmdStatus wv8_handler(RCore *core, int argc, const char **argv) {
 }
 
 static bool cmd_wff(RCore *core, const char *input) {
-	ut8 *buf;
-	size_t size;
-	// XXX: file names cannot contain spaces
+	ut8 *buf = NULL;
+	size_t size = 0;
 	const char *arg = input + ((input[0] == ' ') ? 1 : 0);
 	int wseek = r_config_get_i (core->config, "cfg.wseek");
 	char *p, *a = r_str_trim_dup (arg);
@@ -634,8 +634,7 @@ static bool cmd_wff(RCore *core, const char *input) {
 
 	if (*arg =='?' || !*arg) {
 		eprintf ("Usage: wf [file] ([size] ([offset]))\n");
-	}
-	if (!strcmp (arg, "-")) {
+	} else if (!strcmp (arg, "-")) {
 		char *out = r_core_editor (core, NULL, NULL);
 		if (out) {
 			if (!r_io_write_at (core->io, core->offset,
@@ -646,7 +645,19 @@ static bool cmd_wff(RCore *core, const char *input) {
 			free (out);
 		}
 	}
-	if ((buf = (ut8*) r_file_slurp (a, &size))) {
+	
+	if (*a == '$') {
+		const char *res = r_cmd_alias_get (core->rcmd, a, 1);
+		if (res) {
+			buf = (ut8*)strdup (res);
+			size = strlen (res);
+		}
+	} else {
+		buf = (ut8*) r_file_slurp (a, &size);
+	}
+	if (size < 1) {
+		// nothing to write
+	} else if (buf) {
 		int u_offset = 0;
 		ut64 u_size = r_num_math (core->num, p);
 		if (u_size < 1) u_size = (ut64)size;
@@ -655,6 +666,7 @@ static bool cmd_wff(RCore *core, const char *input) {
 			u_offset = r_num_math (core->num, p);
 			if (u_offset > size) {
 				eprintf ("Invalid offset\n");
+				free (a);
 				free (buf);
 				return false;
 			}
@@ -664,11 +676,12 @@ static bool cmd_wff(RCore *core, const char *input) {
 			eprintf ("r_io_write_at failed at 0x%08"PFMT64x"\n", core->offset);
 		}
 		WSEEK (core, size);
-		free (buf);
 		r_core_block_read (core);
 	} else {
 		eprintf ("Cannot open file '%s'\n", arg);
 	}
+	free (a);
+	free (buf);
 	return true;
 }
 
@@ -777,7 +790,7 @@ static bool cmd_wfs(RCore *core, const char *input) {
 		if (r_io_write_at (core->io, core->offset, buf, done)) {
 			eprintf ("Written %d bytes\n", done);
 		} else {
-			eprintf ("Cannot write\n");
+			cmd_write_fail (core);
 		}
 	}
 	r_socket_free (s);
@@ -1343,6 +1356,53 @@ static int wA_handler_old(void *data, const char *input) {
 	return 0;
 }
 
+static char *__current_filename(RCore *core) {
+	RIOMap *map = r_io_map_get_at (core->io, core->offset);
+	if (map) {
+		RIODesc *desc = r_io_desc_get (core->io, map->fd);
+		if (desc) {
+			return strdup (desc->uri);
+		}
+	}
+	return NULL;
+}
+
+static ut64 __va2pa(RCore *core, ut64 va) {
+	RIOMap *map = r_io_map_get_at (core->io, va);
+	if (map) {
+		return va - map->itv.addr + map->delta;
+	}
+	return va;
+}
+
+static void cmd_wcf(RCore *core, const char *dfn) {
+	char *sfn = __current_filename (core);
+	if (!sfn) {
+		eprintf ("Cannot determine source file.\n");
+		return;
+	}
+	size_t sfs;
+	ut8 *sfb = (ut8*)r_file_slurp (sfn, &sfs);
+	if (sfb) {
+		void **iter;
+		r_pvector_foreach (&core->io->cache, iter) {
+			RIOCache *c = *iter;
+			const ut64 ps = r_itv_size (c->itv);
+			const ut64 va = r_itv_begin (c->itv);
+			const ut64 pa = __va2pa (core, va);
+			if (pa + ps < sfs) {
+				memcpy (sfb + pa, c->data, ps);
+			} else {
+				eprintf ("Out of bounds patch at 0x%08"PFMT64x"\n", pa);
+			}
+		}
+		// patch buffer
+		r_file_dump (dfn, sfb, sfs, false);
+		free (sfb);
+	}
+	free (sfn);
+}
+
 static int wc_handler_old(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 	switch (input[0]) {
@@ -1354,6 +1414,13 @@ static int wc_handler_old(void *data, const char *input) {
 	case '?': // "wc?"
 		r_core_cmd_help (core, help_msg_wc);
 		break;
+	case 'f': // "wcf"
+		if (input[1] == ' ') {
+			cmd_wcf (core, r_str_trim_head_ro (input + 1));
+		} else {
+			eprintf ("Usage: wcf [file]\n");
+		}
+		break;
 	case '*': // "wc*"
 		r_io_cache_list (core->io, 1);
 		break;
@@ -1362,13 +1429,13 @@ static int wc_handler_old(void *data, const char *input) {
 			//r_io_cache_reset (core->io, core->io->cached);
 			eprintf ("TODO\n");
 		} else if (input[1]==' ') { // "wc+ "
-			char *p = strchr (input+2, ' ');
+			char *p = strchr (input + 2, ' ');
 			ut64 to, from;
 			from = r_num_math (core->num, input+2);
 			if (p) {
 				*p = 0;
 				to = r_num_math (core->num, input+2);
-				if (to<from) {
+				if (to < from) {
 					eprintf ("Invalid range (from>to)\n");
 					return 0;
 				}
@@ -1639,8 +1706,14 @@ static int wt_handler_old(void *data, const char *input) {
 				}
 			} else {
 				sz = core->blocksize;
-				if (!r_file_dump (filename, core->block, sz, append)) {
-					sz = -1;
+				if (*filename == '$') {
+					char *data = r_str_ndup ((const char *)core->block, sz);
+					r_cmd_alias_set (core->rcmd, filename, data, 1);
+					free (data);
+				} else {
+					if (!r_file_dump (filename, core->block, sz, append)) {
+						sz = -1;
+					}
 				}
 			}
 		}
@@ -1773,13 +1846,35 @@ static int wa_handler_old(void *data, const char *input) {
 		break;
 	case ' ':
 	case 'i':
+	case 'n':
 	case '*': {
 		const char *file = r_str_trim_head_ro (input + 1);
 		RAsmCode *acode;
 		r_asm_set_pc (core->rasm, core->offset);
 		acode = r_asm_massemble (core->rasm, file);
 		if (acode) {
-			if (input[0] == 'i') { // "wai"
+			if (input[0] == 'n') { // "wan"
+				int patchsize = acode->len;
+				int delta = 0;
+				RAnalOp analop;
+				ut64 at = core->offset;
+repeat:
+				if (!r_anal_op (core->anal, &analop, at, core->block + delta, core->blocksize - delta, R_ANAL_OP_MASK_BASIC)) {
+					eprintf ("Invalid instruction?\n");
+					break;
+				}
+				if (delta < acode->len) {
+					delta += analop.size;
+					at += analop.size;
+					patchsize += analop.size;
+					r_anal_op_fini (&analop);
+					r_core_cmdf (core, "wao nop @ 0x%08"PFMT64x, at);
+					goto repeat;
+				}
+				r_anal_op_fini (&analop);
+				r_core_cmd0 (core, "wao nop");
+				input++;
+			} else if (input[0] == 'i') { // "wai"
 				RAnalOp analop;
 				if (!r_anal_op (core->anal, &analop, core->offset, core->block, core->blocksize, R_ANAL_OP_MASK_BASIC)) {
 					eprintf ("Invalid instruction?\n");
@@ -2068,20 +2163,26 @@ static int cmd_write(void *data, const char *input) {
 	{
 		size_t len = core->blocksize;
 		const char *curcs = r_config_get (core->config, "cfg.charset");
+		char *str = strdup (input);
+
+		r_str_trim_args (str);
+		r_str_trim_tail (str);
+
 		if (R_STR_ISEMPTY (curcs)) {
-			w_handler_old (core, input + 1);
+			w_handler_old (core, str + 1);
 		} else {
 			if (len > 0) {
-				size_t in_len = strlen (input + 1);
+				size_t in_len = strlen (str + 1);
 				int max = core->print->charset->encode_maxkeylen;
 				ut8 *out = malloc (in_len * max); //suppose in len = out len TODO: change it
 				if (out) {
-					r_charset_decode_str (core->print->charset, out, in_len, (const unsigned char *) input + 1, in_len);
+					r_charset_decode_str (core->print->charset, out, in_len, (const unsigned char *) str + 1, in_len);
 					w_handler_old (core, (const char *)out);
 					free (out);
 				}
 			}
 		}
+		free (str);
 		break;
 	}
 	case 'z': // "wz"

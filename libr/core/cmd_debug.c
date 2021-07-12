@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2020 - pancake */
+/* radare - LGPL - Copyright 2009-2021 - pancake */
 
 #include <r_core.h>
 #include <r_debug.h>
@@ -268,6 +268,12 @@ static const char *help_msg_dmm[] = {
 	NULL
 };
 
+static const char *help_msg_dxe[] = {
+	"Usage:", "dxe", " egg-program # see ragg2 and the 'g' command for more details",
+	"dxe", " sym.imp.puts(\"foo\")", "Call puts with a string argument",
+	NULL
+};
+
 static const char *help_msg_dmp[] = {
 	"Usage:", "dmp", " Change page permissions",
 	"dmp", " [addr] [size] [perms]", "Change permissions",
@@ -432,7 +438,8 @@ static const char *help_msg_ds[] = {
 static const char *help_msg_dsu[] = {
 	"Usage: dsu", "", "Step until commands",
 	"dsu", " <address>", "Step until <address>",
-	"dsui", "[r] <instr>", "Step until an instruction that matches <instr>, use dsuir for regex match",
+	"dsui", " <instr>", "Step until an instruction disasm matches",
+	"dsuir", " <regex>", "like dsui, but using a regexp",
 	"dsuo", " <optype> [<optype> ...]", "Step until an instr matches one of the <optype>s.",
 	"dsue", " <esil>", "Step until <esil> expression matches",
 	"dsuf", " <flag>", "Step until pc == <flag> matching name",
@@ -484,6 +491,7 @@ static const char *help_msg_dx[] = {
 	"Usage: dx", "", " # Code injection commands",
 	"dx", " <opcode>...", "Inject opcodes",
 	"dxa", " nop", "Assemble code and inject",
+	"dxc", " addr arg1 arg2 arg3", "Compile egg expression and inject it",
 	"dxe", " egg-expr", "Compile egg expression and inject it",
 	"dxr", " <opcode>...", "Inject opcodes and restore state",
 	"dxs", " write 1, 0x8048, 12", "Syscall injection (see gs)",
@@ -554,7 +562,7 @@ static void setRarunProfileString(RCore *core, const char *str) {
 	free (file);
 }
 
-static void cmd_debug_cont_syscall (RCore *core, const char *_str) {
+static void cmd_debug_cont_syscall(RCore *core, const char *_str) {
 	// TODO : handle more than one stopping syscall
 	int i, *syscalls = NULL;
 	int count = 0;
@@ -2411,6 +2419,10 @@ static void cmd_debug_reg(RCore *core, const char *str) {
 			r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, false); //R_REG_TYPE_GPR, false);
 			int count = r_list_length (args);
 			r_list_foreach (args, iter, arg) {
+				r = r_reg_get (core->dbg->reg, arg, -1);
+				if (!r) {
+					continue;
+				}
 				ut64 off = r_debug_reg_get (core->dbg, arg);
 				if (count == 1) {
 					r_cons_printf ("0x%08"PFMT64x"\n", off);
@@ -3426,7 +3438,8 @@ static void add_breakpoint(RCore *core, const char *input, bool hwbp, bool watch
 
 static void r_core_cmd_bp(RCore *core, const char *input) {
 	RBreakpointItem *bpi;
-	int i, hwbp = r_config_get_i (core->config, "dbg.hwbp");
+	int i;
+	bool hwbp = r_config_get_b (core->config, "dbg.hwbp");
 	RDebugFrame *frame;
 	RListIter *iter;
 	const char *p;
@@ -4044,7 +4057,7 @@ static void debug_trace_calls(RCore *core, const char *input) {
 	r_cons_break_push (static_debug_stop, core->dbg);
 	r_reg_arena_swap (core->dbg->reg, true);
 	if (final_addr != UT64_MAX) {
-		int hwbp = r_config_get_i (core->config, "dbg.hwbp");
+		bool hwbp = r_config_get_b (core->config, "dbg.hwbp");
 		bp_final = r_debug_bp_add (core->dbg, final_addr, hwbp, false, 0, NULL, 0);
 		if (!bp_final) {
 			eprintf ("Cannot set breakpoint at final address (%"PFMT64x")\n", final_addr);
@@ -4630,8 +4643,7 @@ static int cmd_debug_step (RCore *core, const char *input) {
 		case 'i': // dsui
 			if (input[3] == 'r') {
 				step_until_inst (core, input + 4, true);
-			}
-			else {
+			} else {
 				step_until_inst (core, input + 3, false);
 			}
 			break;
@@ -5227,7 +5239,7 @@ static int cmd_debug(void *data, const char *input) {
 					}
 				}
 				if (stop != -1) {
-					P ("stopreason=%d\n", stop);
+					P ("stopreason=%s\n", r_debug_reason_to_string (stop));
 				}
 				break;
 			case 'f': // "dif" "diff"
@@ -5453,10 +5465,14 @@ static int cmd_debug(void *data, const char *input) {
 			ut8 bytes[4096];
 			if (strlen (input + 2) < 4096){
 				int bytes_len = r_hex_str2bin (input + 2, bytes);
-				if (bytes_len>0) r_debug_execute (core->dbg,
-						bytes, bytes_len, 0);
-				else eprintf ("Invalid hexpairs\n");
-			} else eprintf ("Injection opcodes so long\n");
+				if (bytes_len > 0) {
+					r_debug_execute (core->dbg, bytes, bytes_len, 0);
+				} else {
+					eprintf ("Invalid hexpairs\n");
+				}
+			} else {
+				eprintf ("Injection opcodes so long\n");
+			}
 			break;
 		}
 		case 'a': { // "dxa"
@@ -5471,25 +5487,34 @@ static int cmd_debug(void *data, const char *input) {
 			r_asm_code_free (acode);
 			break;
 		}
-		case 'e': { // "dxe"
-			REgg *egg = core->egg;
-			RBuffer *b;
-			const char *asm_arch = r_config_get (core->config, "asm.arch");
-			int asm_bits = r_config_get_i (core->config, "asm.bits");
-			const char *asm_os = r_config_get (core->config, "asm.os");
-			r_egg_setup (egg, asm_arch, asm_bits, 0, asm_os);
-			r_egg_reset (egg);
-			r_egg_load (egg, input + 1, 0);
-			r_egg_compile (egg);
-			b = r_egg_get_bin (egg);
-			r_asm_set_pc (core->rasm, core->offset);
-			r_reg_arena_push (core->dbg->reg);
-			ut64 tmpsz;
-			const ut8 *tmp = r_buf_data (b, &tmpsz);
-			r_debug_execute (core->dbg, tmp, tmpsz, 0);
-			r_reg_arena_pop (core->dbg->reg);
+		case 'e':
+			if (input[2] == '?') {
+				r_core_cmd_help (core, help_msg_dxe);
+			} else { // "dxe"
+				const char *program = r_str_trim_head_ro (input + 2);
+				REgg *egg = core->egg;
+				const char *asm_arch = r_config_get (core->config, "asm.arch");
+				int asm_bits = r_config_get_i (core->config, "asm.bits");
+				const char *asm_os = r_config_get (core->config, "asm.os");
+				r_egg_setup (egg, asm_arch, asm_bits, 0, asm_os);
+				r_egg_reset (egg);
+				r_egg_load (egg, program, 0);
+				if (!r_egg_compile (egg)) {
+					eprintf ("Failed to compile.\n");
+				}
+				RBuffer *b = r_egg_get_bin (egg);
+				r_asm_set_pc (core->rasm, core->offset);
+				r_reg_arena_push (core->dbg->reg);
+				ut64 tmpsz;
+				const ut8 *tmp = r_buf_data (b, &tmpsz);
+				if (tmpsz > 0) {
+					r_debug_execute (core->dbg, tmp, tmpsz, 0);
+				} else {
+					eprintf ("No egg program compiled to execute.\n");
+				}
+				r_reg_arena_pop (core->dbg->reg);
+			}
 			break;
-		}
 		case 'r': // "dxr"
 			r_reg_arena_push (core->dbg->reg);
 			if (input[2] == ' ') {

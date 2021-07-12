@@ -1,4 +1,4 @@
-.Dd Jun 7, 2016
+.Dd Jun 30, 2021
 .Dt R2PM 1
 .Sh NAME
 .Nm R2PM
@@ -20,6 +20,8 @@ Install a package
 Install a package in the system directory
 .It Fl u, Cm uninstall Ar pkgname
 Uninstall a package
+.It Fl U, Cm Upgrade all the outdated packages
+Runs the suggested lines when loading outdated plugins by r2
 .It Fl gu, Cm global-install Ar pkgname
 Uninstall a package from the system directory
 .It Fl l, Cm list
@@ -63,6 +65,15 @@ Search a package
 List available packages
 .Pp
   $ r2pm -s
+.Sh ENVIRONMENT
+.Pp
+ SUDO=sudo
+ R2PM_PLUGDIR=~/.local/share/radare2/plugins
+ R2PM_BINDIR=~/.local/share/radare2/prefix/bin
+ R2PM_OFFLINE=0
+ R2PM_DBDIR=~/.local/share/radare2/r2pm/db
+ R2PM_GITDIR=~/.local/share/radare2/r2pm/git
+ R2PM_GITSKIP=
 .Sh SEE ALSO
 .Pp
 .Xr radare2(1)

@@ -169,6 +169,10 @@ R_API bool r_rbtree_aug_delete(RBNode **root, void *data, RBComparator cmp, void
 				t->child[0]->red = t->child[1]->red = false;
 				g->child[direction3] = t;
 				t->parent = g;
+				if (depth >= R_RBTREE_MAX_HEIGHT) {
+					eprintf ("Too deep tree\n");
+					break;
+				}
 				path[depth - 1] = t;
 				path[depth++] = p;
 			}
@@ -572,9 +576,8 @@ R_API RContRBNode *r_rbtree_cont_node_prev(RContRBNode *node) {
 	return (container_of (parent, RContRBNode, node));
 }
 
-// not a direct pendant to r_rbtree_first, but similar
-// returns first element in the tree, not an iter or a node
-R_API void *r_rbtree_cont_first(RContRBTree *tree) {
+// pendant to r_rbtree_first
+R_API RContRBNode *r_rbtree_cont_node_first(RContRBTree *tree) {
 	r_return_val_if_fail (tree, NULL);
 	if (!tree->root) {
 		// empty tree
@@ -584,10 +587,11 @@ R_API void *r_rbtree_cont_first(RContRBTree *tree) {
 	while (node->child[0]) {
 		node = node->child[0];
 	}
-	return (container_of (node, RContRBNode, node))->data;
+	return container_of (node, RContRBNode, node);
 }
 
-R_API void *r_rbtree_cont_last(RContRBTree *tree) {
+// pendant to r_rbtree_last
+R_API RContRBNode *r_rbtree_cont_node_last(RContRBTree *tree) {
 	r_return_val_if_fail (tree, NULL);
 	if (!tree->root) {
 		// empty tree
@@ -597,7 +601,29 @@ R_API void *r_rbtree_cont_last(RContRBTree *tree) {
 	while (node->child[1]) {
 		node = node->child[1];
 	}
-	return (container_of (node, RContRBNode, node))->data;
+	return container_of (node, RContRBNode, node);
+}
+
+// not a direct pendant to r_rbtree_first, but similar
+// returns first element in the tree, not an iter or a node
+R_API void *r_rbtree_cont_first(RContRBTree *tree) {
+	r_return_val_if_fail (tree, NULL);
+	RContRBNode *first = r_rbtree_cont_node_first (tree);
+	if (!first) {
+		// empty tree
+		return NULL;
+	}
+	return first->data;
+}
+
+R_API void *r_rbtree_cont_last(RContRBTree *tree) {
+	r_return_val_if_fail (tree, NULL);
+	RContRBNode *last = r_rbtree_cont_node_last (tree);
+	if (!last) {
+		// empty tree
+		return NULL;
+	}
+	return last->data;
 }
 
 R_API void r_rbtree_cont_free(RContRBTree *tree) {

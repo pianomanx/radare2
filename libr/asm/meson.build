@@ -1,7 +1,10 @@
+subdir('d')
+
 r_asm_sources = [
   'asm.c',
   'aop.c',
   'acode.c',
+  'aplugs.c',
   'binutils_as.c',
   'p/asm_6502.c',
   'p/asm_6502_cs.c',
@@ -55,7 +58,8 @@ r_asm_sources = [
   'p/asm_snes.c',
   'p/asm_sparc_cs.c',
   'p/asm_sparc_gnu.c',
-  'p/asm_sysz.c',
+  'p/asm_s390_cs.c',
+  'p/asm_s390_gnu.c',
   'p/asm_tms320.c',
   'p/asm_tms320c64x.c',
   'p/asm_tricore.c',
@@ -131,38 +135,14 @@ r_asm_sources = [
   'arch/pic/pic_midrange.c',
   'arch/pic/pic_pic18.c',
   'arch/mcore/mcore.c',
+  'arch/s390/gnu/s390-dis.c',
+  'arch/s390/gnu/s390-opc.c',
   'arch/ppc/gnu/ppc-dis.c',
   'arch/ppc/gnu/ppc-opc.c',
   'arch/ppc/libvle/vle.c',
   'arch/ppc/libps/libps.c',
   'arch/propeller/propeller_disas.c',
-  'arch/pyc/opcode_10.c',
-  'arch/pyc/opcode_11.c',
-  'arch/pyc/opcode_12.c',
-  'arch/pyc/opcode_13.c',
-  'arch/pyc/opcode_14.c',
-  'arch/pyc/opcode_15.c',
-  'arch/pyc/opcode_16.c',
-  'arch/pyc/opcode_20.c',
-  'arch/pyc/opcode_21.c',
-  'arch/pyc/opcode_22.c',
-  'arch/pyc/opcode_23.c',
-  'arch/pyc/opcode_24.c',
-  'arch/pyc/opcode_25.c',
-  'arch/pyc/opcode_26.c',
-  'arch/pyc/opcode_27.c',
-  'arch/pyc/opcode_2x.c',
-  'arch/pyc/opcode_30.c',
-  'arch/pyc/opcode_31.c',
-  'arch/pyc/opcode_32.c',
-  'arch/pyc/opcode_33.c',
-  'arch/pyc/opcode_34.c',
-  'arch/pyc/opcode_35.c',
-  'arch/pyc/opcode_36.c',
-  'arch/pyc/opcode_37.c',
-  'arch/pyc/opcode_38.c',
-  'arch/pyc/opcode_39.c',
-  'arch/pyc/opcode_3x.c',
+  'arch/pyc/opcode_all.c',
   'arch/pyc/opcode_anal.c',
   'arch/pyc/opcode_arg_fmt.c',
   'arch/pyc/opcode.c',
@@ -220,6 +200,10 @@ r_asm_inc = [
     'arch/or1k'
   )
 ]
+
+if get_option('sdb_cgen')
+  r_asm_sources += r_asm_d_sources
+endif
 
 r_asm = library('r_asm', r_asm_sources,
   include_directories: r_asm_inc,

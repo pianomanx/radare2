@@ -1,14 +1,17 @@
-/* radare2 - LGPL - Copyright 2009-2020 - pancake */
+/* radare2 - LGPL - Copyright 2009-2021 - pancake */
 
 #include <r_core.h>
 #include <r_socket.h>
 #include <config.h>
+#include <r_config.h>
 #include <r_util.h>
 #if __UNIX__
 #include <signal.h>
 #endif
 
 #define DB core->sdb
+
+extern void r_core_echo(RCore *core, const char *input);
 
 R_LIB_VERSION(r_core);
 
@@ -338,20 +341,17 @@ R_API RCore *r_core_cast(void *p) {
 	return (RCore*)p;
 }
 
-static ut64 getref (RCore *core, int n, char t, int type) {
+static ut64 getref(RCore *core, int n, char t, int type) {
 	RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, 0);
 	RListIter *iter;
 	RAnalRef *r;
-	RList *list;
 	int i = 0;
 	if (!fcn) {
 		return UT64_MAX;
 	}
-	if (t == 'r') {
-		list = r_anal_function_get_refs (fcn);
-	} else {
-		list = r_anal_function_get_xrefs (fcn);
-	}
+	RList *list = (t == 'r')
+		? r_anal_function_get_refs (fcn)
+		: r_anal_function_get_xrefs (fcn);
 	r_list_foreach (list, iter, r) {
 		if (r->type == type) {
 			if (i == n) {
@@ -363,7 +363,6 @@ static ut64 getref (RCore *core, int n, char t, int type) {
 		}
 	}
 	r_list_free (list);
-
 	return UT64_MAX;
 }
 
@@ -1646,6 +1645,20 @@ static void autocomplete_ms_file(RCore* core, RLineCompletion *completion, const
 	}
 }
 
+static void autocomplete_charsets(RCore *core, RLineCompletion *completion, const char *str) {
+	r_return_if_fail (str);
+	int len = strlen (str);
+	char *name;
+	RListIter *iter;
+	RList *chs = r_charset_list (core->print->charset);
+	r_list_foreach (chs, iter, name) {
+		if (!len || !strncmp (str, name, len)) {
+			r_line_completion_push (completion, name);
+		}
+	}
+	r_list_free (chs);
+}
+
 static void autocomplete_theme(RCore *core, RLineCompletion *completion, const char *str) {
 	r_return_if_fail (str);
 	int len = strlen (str);
@@ -1661,54 +1674,41 @@ static void autocomplete_theme(RCore *core, RLineCompletion *completion, const c
 }
 
 static bool find_e_opts(RCore *core, RLineCompletion *completion, RLineBuffer *buf) {
-	const char *pattern = "e (.*)=";
-	RRegex *rx = r_regex_new (pattern, "e");
-	const size_t nmatch = 2;
-	RRegexMatch pmatch[2] = {0};
-	bool ret = false;
-
 	// required to get the new list of items to autocomplete for cmd.pdc at least
 	r_core_config_update (core);
-
-	if (r_regex_exec (rx, buf->data, nmatch, pmatch, 1)) {
-		goto out;
+	char *str = (char *)r_str_trim_head_ro (buf->data + 1);
+	char *eq = strchr (str, '=');
+	if (!eq) {
+		return false;
 	}
-	int i;
-	char *str = NULL, *sp;
-	for (i = pmatch[1].rm_so; i < pmatch[1].rm_eo; i++) {
-		str = r_str_appendch (str, buf->data[i]);
-	}
-	if (!str) {
-		goto out;
-	}
-	if ((sp = strchr (str, ' '))) {
-		// if the name contains a space, just null
-		*sp = 0;
-	}
-	RConfigNode *node = r_config_node_get (core->config, str);
-	if (sp) {
-		// if nulled, then restore.
-		*sp = ' ';
-	}
+	*eq = 0;
+	char *k = r_str_trim_dup (str);
+	RConfigNode *node = r_config_node_get (core->config, k);
+	free (k);
+	*eq = '=';
 	if (!node) {
 		return false;
 	}
-	RListIter *iter;
-	char *option;
-	char *p = (char *) strchr (buf->data, '=');
-	p = r_str_ichr (p + 1, ' ');
+	const char *p = r_str_trim_head_ro (eq + 1);
 	int n = strlen (p);
-	r_list_foreach (node->options, iter, option) {
-		if (!strncmp (option, p, n)) {
-			r_line_completion_push (completion, option);
+	if (node->flags & 1) {
+		if (!strncmp ("true", p, n)) {
+			r_line_completion_push (completion, "true");
+		}
+		if (!strncmp ("false", p, n)) {
+			r_line_completion_push (completion, "false");
+		}
+	} else {
+		RListIter *iter;
+		char *option;
+		r_list_foreach (node->options, iter, option) {
+			if (!strncmp (option, p, n)) {
+				r_line_completion_push (completion, option);
+			}
 		}
 	}
 	completion->opt = true;
-	ret = true;
-
- out:
-	r_regex_free (rx);
-	return ret;
+	return true;
 }
 
 static bool find_autocomplete(RCore *core, RLineCompletion *completion, RLineBuffer *buf) {
@@ -1784,6 +1784,9 @@ static bool find_autocomplete(RCore *core, RLineCompletion *completion, RLineBuf
 		break;
 	case R_CORE_AUTOCMPLT_THME:
 		autocomplete_theme (core, completion, p);
+		break;
+	case R_CORE_AUTOCMPLT_CHRS:
+		autocomplete_charsets (core, completion, p);
 		break;
 	case R_CORE_AUTOCMPLT_SDB:
 		autocomplete_sdb (core, completion, p);
@@ -2560,7 +2563,11 @@ static void __init_autocomplete_default (RCore* core) {
 		"#!rust", "#!zig", "#!pipe", "#!python", "aeli", "arp", "arpg", "dmd", "drp", "drpg", "o",
 		"idp", "idpi", "L", "obf", "o+", "oc", "r2", "rabin2", "rasm2", "rahash2", "rax2",
 		"rafind2", "cd", "ls", "on", "op", "wf", "rm", "wF", "wp", "Sd", "Sl", "to", "pm",
-		"/m", "zos", "zfd", "zfs", "zfz", "cat", "wta", "wtf", "wxf", "dml", "vi",
+		"/m", "zos", "zfd", "zfs", "zfz", "cat", "wta", "wtf", "wxf", "dml",
+		"vi", "vim", "nvi", "neovim", "nvim", "nano",
+#if __WINDOWS__
+		"notepad",
+#endif
 		"less", "head", "tail", NULL
 	};
 	const char *vars[] = {
@@ -2748,6 +2755,7 @@ static void ev_iowrite_cb(REvent *ev, int type, void *user, void *data) {
 }
 
 R_API bool r_core_init(RCore *core) {
+	r_w32_init ();
 	core->blocksize = R_CORE_BLOCKSIZE;
 	core->block = (ut8 *)calloc (R_CORE_BLOCKSIZE + 1, 1);
 	if (!core->block) {
@@ -2768,7 +2776,6 @@ R_API bool r_core_init(RCore *core) {
 	core->config = NULL;
 	core->prj = r_project_new ();
 	core->http_up = false;
-	core->use_tree_sitter_r2cmd = false;
 	ZERO_FILL (core->root_cmd_descriptor);
 	core->print = r_print_new ();
 	core->ropchain = r_list_newf ((RListFree)free);
@@ -2803,12 +2810,14 @@ R_API bool r_core_init(RCore *core) {
 	core->printidx = 0;
 	core->lastcmd = NULL;
 	core->cmdlog = NULL;
+
+	sdb_free (core->print->charset->db);
 	core->print->charset->db = sdb_ns (core->sdb, "charset", 1);
 	core->print->charset->db->refs++; // increase reference counter to avoid double-free
 	// ideally sdb_ns_set should be used here, but it doesnt seems to work well. must fix
 	// sdb_ns_set (DB, "charset", core->print->charset->db);
 	core->stkcmd = NULL;
-	core->cmdqueue = NULL;
+	core->cmdqueue = r_list_newf (free);
 	core->cmdrepeat = true;
 	core->yank_buf = r_buf_new ();
 	core->num = r_num_new (&num_callback, &str_callback, core);
@@ -3008,7 +3017,7 @@ R_API void r_core_fini(RCore *c) {
 	free (c->cmdlog);
 	free (c->lastsearch);
 	R_FREE (c->cons->pager);
-	free (c->cmdqueue);
+	r_list_free (c->cmdqueue);
 	free (c->lastcmd);
 	free (c->stkcmd);
 	r_project_free (c->prj);
@@ -3064,23 +3073,24 @@ R_API void r_core_free(RCore *c) {
 	}
 }
 
-R_API void r_core_prompt_loop(RCore *r) {
+R_API bool r_core_prompt_loop(RCore *r) {
 	int ret;
 	do {
 		int err = r_core_prompt (r, false);
 		if (err < 1) {
 			// handle ^D
 			r->num->value = 0; // r.num->value will be read by r_main_radare2() after calling this fcn
-			break;
+			return false;
 		}
 		/* -1 means invalid command, -2 means quit prompt loop */
 		if ((ret = r_core_prompt_exec (r)) == -2) {
 			break;
 		}
 	} while (ret != R_CORE_CMD_EXIT);
+	return true;
 }
 
-static int prompt_flag (RCore *r, char *s, size_t maxlen) {
+static int prompt_flag(RCore *r, char *s, size_t maxlen) {
 	const char DOTS[] = "...";
 	const RFlagItem *f = r_flag_get_at (r->flags, r->offset, false);
 	if (!f) {
@@ -3107,7 +3117,7 @@ static void prompt_sec(RCore *r, char *s, size_t maxlen) {
 	strcat (s, ":");
 }
 
-static void chop_prompt (const char *filename, char *tmp, size_t max_tmp_size) {
+static void chop_prompt(const char *filename, char *tmp, size_t max_tmp_size) {
 	size_t tmp_len, file_len;
 	unsigned int OTHRSCH = 3;
 	const char DOTS[] = "...";
@@ -3126,7 +3136,7 @@ static void chop_prompt (const char *filename, char *tmp, size_t max_tmp_size) {
 	}
 }
 
-static void set_prompt (RCore *r) {
+static void set_prompt(RCore *r) {
 	char tmp[128];
 	char *filename = strdup ("");
 	const char *cmdprompt = r_config_get (r->config, "cmd.prompt");
@@ -3194,6 +3204,34 @@ static void set_prompt (RCore *r) {
 	R_FREE (prompt);
 }
 
+R_API void r_core_cmd_queue_wait(RCore *core) {
+	const bool interactive = r_config_get_b (core->config, "scr.interactive");
+	if (!interactive) {
+		return;
+	}
+	r_cons_push ();
+	r_cons_break_push (NULL, NULL);
+	while (!r_cons_is_breaked ()) {
+		char *cmd = r_list_pop (core->cmdqueue);
+		if (cmd) {
+			r_core_cmd0 (core, cmd);
+			r_cons_flush ();
+		}
+		r_sys_usleep (100);
+	}
+	r_cons_break_pop ();
+	r_cons_pop ();
+}
+
+R_API void r_core_cmd_queue(RCore *core, const char *line) {
+	if (line) {
+		r_list_append (core->cmdqueue, strdup (line));
+	} else {
+		r_list_free (core->cmdqueue);
+		core->cmdqueue = r_list_newf (free);
+	}
+}
+
 R_API int r_core_prompt(RCore *r, int sync) {
 	char line[4096];
 
@@ -3210,8 +3248,7 @@ R_API int r_core_prompt(RCore *r, int sync) {
 	if (sync) {
 		return r_core_prompt_exec (r);
 	}
-	free (r->cmdqueue);
-	r->cmdqueue = strdup (line);
+	r_core_cmd_queue (r, line);
         if (r->scr_gadgets && *line && *line != 'q') {
                 r_core_cmd0 (r, "pg");
         }
@@ -3219,21 +3256,31 @@ R_API int r_core_prompt(RCore *r, int sync) {
 	return true;
 }
 
-extern void r_core_echo(RCore *core, const char *input);
-
 R_API int r_core_prompt_exec(RCore *r) {
-	int ret = r_core_cmd (r, r->cmdqueue, true);
-	r->rc = r->num->value;
-	//int ret = r_core_cmd (r, r->cmdqueue, true);
-	if (r->cons && r->cons->use_tts) {
-		const char *buf = r_cons_get_buffer();
-		r_sys_tts (buf, true);
-		r->cons->use_tts = false;
-	}
-	r_cons_echo (NULL);
-	r_cons_flush ();
-	if (r->cons && r->cons->line && r->cons->line->zerosep) {
-		r_cons_zero ();
+	int ret = -1;
+	while (!r_list_empty (r->cmdqueue)) {
+		char *cmd = r_list_pop (r->cmdqueue);
+		if (!cmd) {
+			break;
+		}
+		ret = r_core_cmd (r, cmd, true);
+		if (ret < 0) {
+			r_core_cmd_queue (r, NULL);
+			break;
+		}
+		r->rc = r->num->value;
+		// int ret = r_core_cmd (r, cmd, true);
+		free (cmd);
+		if (r->cons && r->cons->use_tts) {
+			const char *buf = r_cons_get_buffer ();
+			r_sys_tts (buf, true);
+			r->cons->use_tts = false;
+		}
+		r_cons_echo (NULL);
+		r_cons_flush ();
+		if (r->cons && r->cons->line && r->cons->line->zerosep) {
+			r_cons_zero ();
+		}
 	}
 	return ret;
 }
@@ -3723,19 +3770,19 @@ R_API char *r_core_editor(const RCore *core, const char *file, const char *str) 
 }
 
 /* weak getters */
-R_API RCons *r_core_get_cons (RCore *core) {
+R_API RCons *r_core_get_cons(RCore *core) {
 	return core->cons;
 }
 
-R_API RConfig *r_core_get_config (RCore *core) {
+R_API RConfig *r_core_get_config(RCore *core) {
 	return core->config;
 }
 
-R_API RBin *r_core_get_bin (RCore *core) {
+R_API RBin *r_core_get_bin(RCore *core) {
 	return core->bin;
 }
 
-R_API RBuffer *r_core_syscallf (RCore *core, const char *name, const char *fmt, ...) {
+R_API RBuffer *r_core_syscallf(RCore *core, const char *name, const char *fmt, ...) {
 	char str[1024];
 	RBuffer *buf;
 	va_list ap;
@@ -3748,10 +3795,9 @@ R_API RBuffer *r_core_syscallf (RCore *core, const char *name, const char *fmt, 
 	return buf;
 }
 
-R_API RBuffer *r_core_syscall (RCore *core, const char *name, const char *args) {
+R_API RBuffer *r_core_syscall(RCore *core, const char *name, const char *args) {
 	RBuffer *b = NULL;
 	char code[1024];
-	int num;
 
 	//arch check
 	if (strcmp (core->anal->cur->arch, "x86")) {
@@ -3759,7 +3805,7 @@ R_API RBuffer *r_core_syscall (RCore *core, const char *name, const char *args) 
 		return 0;
 	}
 
-	num = r_syscall_get_num (core->anal->syscall, name);
+	int num = r_syscall_get_num (core->anal->syscall, name);
 
 	//bits check
 	switch (core->rasm->bits) {
@@ -3921,6 +3967,5 @@ R_API PJ *r_core_pj_new(RCore *core) {
 	} else if (!strcmp ("strip", config_string_encoding)) {
 		string_encoding = PJ_ENCODING_STR_STRIP;
 	}
-
 	return pj_new_with_encoding (string_encoding, number_encoding);
 }

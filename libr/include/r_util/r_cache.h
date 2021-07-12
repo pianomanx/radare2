@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include <r_types.h>
+
 typedef struct r_cache_t {
 	ut64 base;
 	ut8 *buf;
@@ -12,7 +14,7 @@ typedef struct r_cache_t {
 } RCache;
 
 typedef struct r_prof_t {
-	struct timeval begin;
+	struct timeval when;
 	double result;
 } RProfile;
 

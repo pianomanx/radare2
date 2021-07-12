@@ -32,7 +32,7 @@ RAsmPlugin r_asm_plugin_dummy = {
 };
 ```
 
-This information is accessible at runtime by using the `L` command or commandline flag in any of the r2 programs:
+This information is accessible at runtime by using the `L` command or command-line flag in any of the r2 programs:
 
 ```
 $ r2 -Lj | jq -r '.[].license' | sort -u
@@ -77,8 +77,7 @@ should be copied to `./plugins.cfg` before calling `./configure-plugins` to take
 
 ### Less restrictive than LGPL
 
-* libr/asm/arch/gnu: GPLv2
-* libr/bin/mangling/cxx: GPLv2
+* libr/bin/mangling/cxx: GPLv2 or later, with linking exception
 * shlr/capstone: BSD + LLVM
 * shlr/zip/zip: BSD
 * shlr/zip/zlib: BSD

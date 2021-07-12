@@ -263,13 +263,6 @@ static bool cb_analgraphdepth(void *user, void *data) {
 	return true;
 }
 
-static bool cb_analafterjmp(void *user, void *data) {
-	RCore *core = (RCore*) user;
-	RConfigNode *node = (RConfigNode*) data;
-	core->anal->opt.afterjmp = node->i_value;
-	return true;
-}
-
 static bool cb_anal_delay(void *user, void *data) {
 	RCore *core = (RCore*) user;
 	RConfigNode *node = (RConfigNode*) data;
@@ -752,6 +745,9 @@ static bool cb_asmbits(void *user, void *data) {
 	}
 
 	int bits = node->i_value;
+	if (!bits) {
+		return false;
+	}
 #if 0
 // TODO: pretty good optimization, but breaks many tests when arch is different i think
 	if (bits == core->rasm->bits && bits == core->anal->bits && bits == core->dbg->bits) {
@@ -974,6 +970,18 @@ static bool cb_asmos(void *user, void *data) {
 	return true;
 }
 
+static void update_cfgcharsets_options(RCore *core, RConfigNode *node) {
+	// static void autocomplete_charsets(RCore *core, RLineCompletion *completion, const char *str) {
+	char *name;
+	RListIter *iter;
+	RList *chs = r_charset_list (core->print->charset);
+	r_config_node_purge_options (node);
+	r_list_foreach (chs, iter, name) {
+		SETOPTIONS (node, name, NULL);
+	}
+	r_list_free (chs);
+}
+
 static void update_asmparser_options(RCore *core, RConfigNode *node) {
 	RListIter *iter;
 	RParsePlugin *parser;
@@ -993,7 +1001,6 @@ static bool cb_asmparser(void *user, void *data) {
 		print_node_options (node);
 		return false;
 	}
-
 	return r_parse_use (core->parser, node->value);
 }
 
@@ -1218,22 +1225,20 @@ static bool cb_cfgcharset(void *user, void *data) {
 	RConfigNode *node = (RConfigNode*) data;
 	const char *cf = r_str_trim_head_ro (node->value);
 	if (!*cf) {
+		r_charset_close (core->print->charset);
 		return true;
 	}
-
-	const char *cs = R2_PREFIX R_SYS_DIR R2_SDB R_SYS_DIR "charsets" R_SYS_DIR;
 	bool rc = false;
 	if (*cf == '?') {
+		const char *cs = R2_PREFIX R_SYS_DIR R2_SDB R_SYS_DIR "charsets" R_SYS_DIR;
 		list_available_plugins (cs);
 	} else {
-		char *syscs = r_str_newf ("%s%s.sdb", cs, cf);
-		if (r_file_exists (syscs)) {
-			rc = r_charset_open (core->print->charset, syscs);
+		rc = r_charset_use (core->print->charset, cf);
+		if (rc) {
+			r_sys_setenv ("RABIN2_CHARSET", cf);
+		} else {
+			eprintf ("Warning: Cannot load charset file '%s'.\n", cf);
 		}
-		if (!rc) {
-			eprintf ("Warning: Cannot load charset file '%s' '%s'.\n", syscs, cf);
-		}
-		free (syscs);
 	}
 	return rc;
 }
@@ -2087,6 +2092,12 @@ static bool cb_io_cache_mode(void *user, void *data) {
 	return true;
 }
 
+static bool cb_io_cache_nodup(void *user, void *data) {
+	RCore *core = (RCore *)user;
+	RConfigNode *node = (RConfigNode *)data;
+	core->io->nodup = node->i_value;
+	return true;
+}
 static bool cb_io_cache_read(void *user, void *data) {
 	RCore *core = (RCore *)user;
 	RConfigNode *node = (RConfigNode *)data;
@@ -2238,6 +2249,13 @@ static bool cb_scrbreakword(void* user, void* data) {
 	return true;
 }
 
+static bool cb_scroptimize(void* user, void* data) {
+	RConfigNode *node = (RConfigNode*) data;
+	RCore *core = (RCore*) user;
+	core->cons->optimize = node->i_value;
+	return true;
+}
+
 static bool cb_scrcolumns(void* user, void* data) {
 	RConfigNode *node = (RConfigNode*) data;
 	RCore *core = (RCore*) user;
@@ -2263,9 +2281,8 @@ static bool cb_scrhtml(void *user, void *data) {
 }
 
 static bool cb_newshell(void *user, void *data) {
-	RConfigNode *node = (RConfigNode *)data;
-	RCore *core = (RCore *)user;
-	core->use_tree_sitter_r2cmd = node->i_value;
+	// uncommenting this will break 39 tests
+	// eprintf ("Warning: newshell has been temporarily disabled\n");
 	return true;
 }
 
@@ -3058,6 +3075,31 @@ static bool cb_dbg_verbose(void *user, void *data) {
 	return true;
 }
 
+static bool cb_prjvctype(void *user, void *data) {
+	RConfigNode *node = data;
+	char *p = r_file_path ("git");
+	bool found = (p && (*p == 'g' ||*p == '/'));
+	free (p);
+	if (*node->value == '?') {
+		if (found) {
+			r_cons_println ("git");
+		}
+		r_cons_println ("rvc");
+		return true;
+	}
+	if (!strcmp (node->value, "git")) {
+		if (found) {
+			return true;
+		}
+		return false;
+	}
+	if (!strcmp (node->value, "rvc")) {
+		return true;
+	}
+	eprintf ("Unknown vc %s\n", node->value);
+	return true;
+}
+
 R_API int r_core_config_init(RCore *core) {
 	int i;
 	char buf[128], *p, *tmpdir;
@@ -3137,7 +3179,6 @@ R_API int r_core_config_init(RCore *core) {
 	SETICB ("anal.jmp.tailcall", 0, &cb_anal_jmptailcall, "Consume a branch as a call if delta is big");
 
 	SETCB ("anal.armthumb", "false", &cb_analarmthumb, "aae computes arm/thumb changes (lot of false positives ahead)");
-	SETCB ("anal.jmp.after", "true", &cb_analafterjmp, "Continue analysis after jmp/ujmp");
 	SETCB ("anal.endsize", "true", &cb_anal_endsize, "Adjust function size at the end of the analysis (known to be buggy)");
 	SETCB ("anal.delay", "true", &cb_anal_delay, "Enable delay slot analysis if supported by the architecture");
 	SETICB ("anal.depth", 64, &cb_analdepth, "Max depth at code analysis"); // XXX: warn if depth is > 50 .. can be problematic
@@ -3249,6 +3290,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETBPREF ("asm.hint.call", "true", "Show call hints [numbers] in disasm");
 	SETBPREF ("asm.hint.call.indirect", "true", "Hints for indirect call intructions go to the call destination");
 	SETBPREF ("asm.hint.lea", "false", "Show LEA hints [numbers] in disasm");
+	SETBPREF ("asm.hint.imm", "false", "Show immediate hints [numbers] in disasm");
 	SETBPREF ("asm.hint.emu", "false", "Show asm.emu hints [numbers] in disasm");
 	SETBPREF ("asm.hint.cdiv", "false", "Show CDIV hints optimization hint");
 	SETI ("asm.hint.pos", 1, "Shortcut hint position (-1, 0, 1)");
@@ -3429,17 +3471,13 @@ R_API int r_core_config_init(RCore *core) {
 	/* prj */
 	SETCB ("prj.name", "", &cb_prjname, "Name of current project");
 	SETBPREF ("prj.files", "false", "Save the target binary inside the project directory");
-	{
-		char *p = r_file_path ("git");
-		bool found = (p && *p == '/');
-		SETBPREF ("prj.git", r_str_bool (found), "Use git to share your project and version changes");
-		free (p);
-	}
+	SETBPREF ("prj.vc", "true", "Use your version control system of choice (rvc, git) to manage projects");
 	SETBPREF ("prj.zip", "false", "Use ZIP format for project files");
 	SETBPREF ("prj.gpg", "false", "TODO: Encrypt project with GnuPGv2");
 
 	/* cfg */
-	SETCB ("cfg.charset", "", &cb_cfgcharset, "Specify encoding to use when printing strings");
+	n = SETCB ("cfg.charset", "", &cb_cfgcharset, "Specify encoding to use when printing strings");
+	update_cfgcharsets_options (core, n);
 	SETBPREF ("cfg.r2wars", "false", "Enable some tweaks for the r2wars game");
 	SETBPREF ("cfg.plugins", "true", "Load plugins at startup");
 	SETCB ("time.fmt", "%Y-%m-%d %H:%M:%S %z", &cb_cfgdatefmt, "Date format (%Y-%m-%d %H:%M:%S %z)");
@@ -3533,19 +3571,19 @@ R_API int r_core_config_init(RCore *core) {
 		free (path);
 	}
 	SETCB ("dir.source", "", &cb_dirsrc, "Path to find source files");
-	SETPREF ("dir.types", "/usr/include", "Default path to look for cparse type files");
+	SETPREF ("dir.types", "/usr/include", "Default colon-separated list of paths to find C headers to cparse types");
 	SETPREF ("dir.libs", "", "Specify path to find libraries to load when bin.libs=true");
+#if __EMSCRIPTEN__ || __wasi__
+	p = strdup ("/tmp");
+#else
 	p = r_sys_getenv (R_SYS_HOME);
+#endif
 	SETCB ("dir.home", r_str_get_fail (p, "/"), &cb_dirhome, "Path for the home directory");
 	free (p);
 	p = r_sys_getenv (R_SYS_TMP);
 	SETCB ("dir.tmp", r_str_get (p), &cb_dirtmp, "Path of the tmp directory");
 	free (p);
-#if __ANDROID__
-	SETCB ("dir.projects", "/data/data/org.radare.radare2installer/radare2/projects", &cb_dir_projects, "Default path for projects");
-#else
 	SETCB ("dir.projects", R_JOIN_2_PATHS ("~", R2_HOME_PROJECTS), &cb_dir_projects, "Default path for projects");
-#endif
 	SETCB ("dir.zigns", R_JOIN_2_PATHS ("~", R2_HOME_ZIGNS), &cb_dirzigns, "Default path for zignatures (see zo command)");
 	SETPREF ("stack.reg", "SP", "Which register to use as stack pointer in the visual debug");
 	SETBPREF ("stack.bytes", "true", "Show bytes instead of words in stack");
@@ -3557,7 +3595,8 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("dbg.wrap", "false", &cb_dbg_wrap, "Enable the ptrace-wrap abstraction layer (needed for debugging from iaito)");
 	SETCB ("dbg.libs", "", &cb_dbg_libs, "If set stop when loading matching libname");
 	SETBPREF ("dbg.skipover", "false", "Make dso perform a dss (same goes for esil and visual/graph");
-	SETI ("dbg.hwbp", 0, "Set HW or SW breakpoints");
+	SETBPREF ("dbg.hwbp", "false", "Use hardware breakpoints instead of software ones when enabled");
+	SETCB ("dbg.", "true", &cb_dbg_verbose, "Verbose debug output");
 	SETCB ("dbg.unlibs", "", &cb_dbg_unlibs, "If set stop when unloading matching libname");
 	SETCB ("dbg.verbose", "true", &cb_dbg_verbose, "Verbose debug output");
 	SETBPREF ("dbg.slow", "false", "Show stack and regs in visual mode in a slow but verbose mode");
@@ -3685,6 +3724,8 @@ R_API int r_core_config_init(RCore *core) {
 #else
 	if (r_file_exists ("/usr/bin/openURL")) { // iOS ericautils
 		r_config_set (cfg, "http.browser", "/usr/bin/openURL");
+	} else if (r_file_exists (TERMUX_PREFIX "/bin/termux-open")) {
+		r_config_set (cfg, "http.browser", TERMUX_PREFIX "/bin/termux-open");
 	} else if (r_file_exists ("/system/bin/toolbox")) {
 		r_config_set (cfg, "http.browser",
 				"LD_LIBRARY_PATH=/system/lib am start -a android.intent.action.VIEW -d");
@@ -3699,7 +3740,7 @@ R_API int r_core_config_init(RCore *core) {
 #endif
 	SETI ("http.maxsize", 0, "Maximum file size for upload");
 	SETPREF ("http.index", "index.html", "Main html file to check in directory");
-	SETPREF ("http.bind", "localhost", "Server address");
+	SETPREF ("http.bind", "localhost", "Server address (use 'public' for binding to 0.0.0.0)");
 	SETPREF ("http.homeroot", R_JOIN_2_PATHS ("~", R2_HOME_WWWROOT), "http home root directory");
 #if __WINDOWS__
 	{
@@ -3707,12 +3748,11 @@ R_API int r_core_config_init(RCore *core) {
 		SETPREF ("http.root", wwwroot, "http root directory");
 		free (wwwroot);
 	}
-#elif __ANDROID__
-	SETPREF ("http.root", "/data/data/org.radare.radare2installer/www", "http root directory");
 #else
 	SETPREF ("http.root", R2_WWWROOT, "http root directory");
 #endif
 	SETPREF ("http.port", "9090", "HTTP server port");
+	SETPREF ("http.basepath", "/", "Define base path for http requests");
 	SETPREF ("http.maxport", "9999", "Last HTTP server port");
 	SETPREF ("http.ui", "m", "Default webui (m, t, f)");
 	SETBPREF ("http.sandbox", "true", "Sandbox the HTTP server");
@@ -3791,7 +3831,7 @@ R_API int r_core_config_init(RCore *core) {
 
 
 	/* scr */
-#if __EMSCRIPTEN__
+#if __EMSCRIPTEN__ || __wasi__
 	r_config_set_cb (cfg, "scr.fgets", "true", cb_scrfgets);
 #else
 	r_config_set_cb (cfg, "scr.fgets", "false", cb_scrfgets);
@@ -3827,6 +3867,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("scr.gadgets", "true", &cb_scr_gadgets, "Run pg in prompt, visual and panels");
 	SETBPREF ("scr.panelborder", "false", "Specify panels border active area (0 by default)");
 	SETICB ("scr.columns", 0, &cb_scrcolumns, "Force console column count (width)");
+	SETICB ("scr.optimize", 0, &cb_scroptimize, "Optimize the amount of ansi escapes and spaces (0, 1, 2 passes)");
 	SETBPREF ("scr.dumpcols", "false", "Prefer pC commands before p ones");
 	SETCB ("scr.rows", "0", &cb_scrrows, "Force console row count (height) ");
 	SETICB ("scr.rows", 0, &cb_rows, "Force console row count (height) (duplicate?)");
@@ -3912,6 +3953,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("io.cache", "false", &cb_io_cache, "Change both of io.cache.{read,write}");
 	SETCB ("io.cache.auto", "false", &cb_io_cache_mode, "Automatic cache all reads in the IO backend");
 	SETCB ("io.cache.read", "false", &cb_io_cache_read, "Enable read cache for vaddr (or paddr when io.va=0)");
+	SETCB ("io.cache.nodup", "false", &cb_io_cache_nodup, "Do not cache duplicated cache writes");
 	SETCB ("io.cache.write", "false", &cb_io_cache_write, "Enable write cache for vaddr (or paddr when io.va=0)");
 	SETCB ("io.pcache", "false", &cb_iopcache, "io.cache for p-level");
 	SETCB ("io.pcache.write", "false", &cb_iopcachewrite, "Enable write-cache");
@@ -3971,7 +4013,18 @@ R_API int r_core_config_init(RCore *core) {
 	SETI ("lines.from", 0, "Start address for line seek");
 	SETCB ("lines.to", "$s", &cb_linesto, "End address for line seek");
 	SETCB ("lines.abs", "false", &cb_linesabs, "Enable absolute line numbers");
-
+	/* RVC */
+	{
+		char *p = r_file_path ("git");
+		if (strcmp (p, "git")) {
+			SETCB ("prj.vc.type", "git", &cb_prjvctype, "What should projects use as a vc");
+		} else {
+			SETBPREF ("prj.vc", "false", "Use your version control system of choice (rvc, git) to manage projects");
+			/*The follwing is just a place holder*/
+			SETCB ("prj.vc.type", "rvc", &cb_prjvctype, "What should projects use as a vc");
+		}
+		free (p);
+	}
 	r_config_lock (cfg, true);
 	return true;
 }

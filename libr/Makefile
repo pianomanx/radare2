@@ -70,6 +70,9 @@ LDFLAGS+=${SSL_LDFLAGS}
 #endif
 # from env: ALFLAGS+=$(ALFLAGS)
 
+localize_hidden:
+	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+
 # ${PARTIALLD} $(ALFLAGS) $(MLFLAGS) $(PLFLAGS) -o .libr/$$(basename $${LIB}.a).o $${LIB}
 .libr: $(wildcard */libr_*.${EXT_AR}) ../shlr/libr_shlr.${EXT_AR}
 	rm -rf .libr
@@ -78,16 +81,16 @@ LDFLAGS+=${SSL_LDFLAGS}
 		${PARTIALLD} $(ALFLAGS) $(MLFLAGS) $(PLFLAGS) -o .libr/$$(basename $${LIB}.a).o $${LIB} ; \
 	done
 ifeq ($(OSTYPE),linux)
-	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+	$(MAKE) localize_hidden
 endif
 ifeq ($(OSTYPE),gnulinux)
-	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+	$(MAKE) localize_hidden
 endif
 ifeq ($(OSTYPE),android)
-	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+	$(MAKE) localize_hidden
 endif
 ifeq ($(OSTYPE),bsd)
-	for LIB in .libr/* ; do $(OBJCOPY) --localize-hidden $$LIB ; done
+	$(MAKE) localize_hidden
 endif
 
 _libr.${EXT_AR}: .libr
@@ -116,8 +119,6 @@ E+=../shlr/ar/libr_ar.${EXT_AR}
 E+=../shlr/winkd/libr_winkd.${EXT_AR}
 E+=../shlr/qnx/lib/libqnxr.${EXT_AR}
 E+=../shlr/bochs/lib/libbochs.${EXT_AR}
-E+=../shlr/radare2-shell-parser/libshell-parser.${EXT_AR}
-E+=../shlr/tree-sitter/libtree-sitter.${EXT_AR}
 #ifeq ($(COMPILER),ios-sdk)
 #E+=../shlr/sdb/src/libsdb.${EXT_AR}
 #endif
@@ -132,16 +133,16 @@ E+=../shlr/capstone/libcapstone.${EXT_AR}
 endif
 
 ifeq ($(OSTYPE),darwin)
-libr_LDFLAGS=-dynamiclib -shared
+LIBR_LDFLAGS=-dynamiclib -shared
 else
-libr_LDFLAGS=-shared
+LIBR_LDFLAGS=-shared
 endif
 
 libr.${EXT_SO}: .libr2
 ifeq (${COMPILER},emscripten)
 	echo nothing to do here
 else
-	$(CC) -fvisibility=hidden $(MLFLAGS) ${LINK} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} $(libr_LDFLAGS) -o libr.${EXT_SO}  \
+	$(CC) -fvisibility=hidden $(MLFLAGS) ${LINK} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} $(LIBR_LDFLAGS) -o libr.${EXT_SO}  \
 		.libr2/*/*.o \
 		../shlr/gdb/lib/libgdbr.${EXT_AR} ../shlr/java/libr_java.${EXT_AR} \
 		../shlr/libr_shlr.${EXT_AR} ../shlr/mpc/libmpc.${EXT_AR} $(E) \

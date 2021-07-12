@@ -1,7 +1,7 @@
 PREFIX?=/usr
 DESTDIR?=/
 
-R2BINS=radare2 rabin2 rarun2 rasm2 ragg2 rahash2 rax2 rafind2 radiff2
+R2BINS=radare2 rabin2 rarun2 rasm2 ragg2 rahash2 rax2 rvc2 rafind2 radiff2
 BINS=r2blob
 
 SOURCES= r2blob.c
@@ -54,7 +54,6 @@ include ../../shlr/qnx/deps.mk
 include ../../shlr/ar/deps.mk
 include ../../shlr/sdb.mk
 include ../../shlr/capstone.mk
-include ../../shlr/radare2-shell-parser-deps.mk
 
 .PHONY: all symlinks build install blobclean
 all: symlinks

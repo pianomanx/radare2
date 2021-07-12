@@ -9,6 +9,7 @@
 #else
 #  include <sys/param.h>
 #  include <sys/mman.h>
+#if 0
 #  if !defined(__pnacl__) && !defined(__native_client__) && !defined(__HAIKU__)
 #    include <sys/syscall.h>
 #    if !defined(SYS_write) && defined(__NR_write)
@@ -16,13 +17,16 @@
 #    endif
 #    include <sys/uio.h>
 #  endif
+#ifndef __wasi__
 #  include <pthread.h>
+#endif
 #  ifdef JEMALLOC_OS_UNFAIR_LOCK
 #    include <os/lock.h>
 #  endif
 #  ifdef JEMALLOC_GLIBC_MALLOC_HOOK
 #    include <sched.h>
 #  endif
+#endif
 #  include <errno.h>
 #  include <sys/time.h>
 #  include <time.h>

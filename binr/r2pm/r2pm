@@ -12,6 +12,7 @@ if [ $? != 0 ]; then
 fi
 
 # Exported Vars
+[ -z "${R2PM_OFFLINE}" ] && R2PM_OFFLINE=0
 MAKE=make
 [ -z "${CURL}" ] && CURL=curl
 gmake --help >/dev/null 2>&1
@@ -22,7 +23,7 @@ export R2PM_JOBS=4
 export R2PMCACHE="$HOME/.r2pm.cache"
 
 # Set R2_* Vars
-eval $(r2 -H)
+eval $(r2 -H 2> /dev/null)
 export R2_VERSION
 
 R2PM=$0
@@ -72,7 +73,7 @@ export R2PM_USRPLUGIN_DIR="$R2_USER_PLUGINS"
 [ -z "${R2PM_PLUGDIR}" ] && R2PM_PLUGDIR="${R2DATAHOME}/plugins"
 
 # www
-export R2PM_SYSWWWROOT="`r2 -qc 'e http.root' --`"
+export R2PM_SYSWWWROOT="`r2 -qc 'e http.root' -- 2> /dev/null`"
 export R2PM_HOMEWWWROOT="${R2DATAHOME}/www/"
 export R2PM_WWWROOT="${R2PM_HOMEWWWROOT}"
 
@@ -128,6 +129,7 @@ Commands:
  -i,install <pkgname>        install or update package in your home (pkgname=all)
  -gi,global-install <pkg>    install or update package system-wide
  -gu,global-uninstall <pkg>  uninstall pkg from systemdir
+ -U,upgrade                  r2pm -U (upgrade all outdated plugins)
  -u,uninstall <pkgname>      r2pm -u baleful (-uu to force)
  -l,list                     list installed pkgs
  -r,run [cmd ...args]        run shell command with R2PM_BINDIR in PATH
@@ -144,12 +146,13 @@ Commands:
  init | update ..            initialize/update database
  cd [git/dir]                cd into given git (see 'r2pm ls')
  ls                          ls all cloned git repos in GITDIR
- suicide                     self remove all (home + system) installations of r2
+ purge                       self destroy all r2 installations
  cache                       cache contents of r2 -H to make r2pm r2-independent
 Environment:
- SUDO=sudo                    use this tool as sudo
+ SUDO=sudo                   use this tool as sudo
  R2PM_PLUGDIR=${R2PM_PLUGDIR}
  R2PM_BINDIR=${R2PM_BINDIR}
+ R2PM_OFFLINE=0              disabled by default, avoid init/update calls if set to !=0
  R2PM_DBDIR=${R2PM_DBDIR}
  R2PM_GITDIR=${R2PM_GITDIR}
  R2PM_GITSKIP=${R2PM_GITSKIP}
@@ -190,7 +193,7 @@ countDown() {
 	echo 'Go!'
 }
 
-commitSuicide() {
+thePurge() {
 	confirm "Do you wanna purge r2 completely from your system and home?"
 	if [ $? != 0 ]; then
 		echo "Aborted." > /dev/stderr
@@ -212,12 +215,20 @@ commitSuicide() {
 	unset IFS
 }
 
-case "$1" in
-init|up|update)
+upgradeOutdated() {
+	LINES=`r2 -qcq -- 2>&1 | grep r2pm | sed -e 's,$,;,g'`
+	if [ -n "${LINES}" ]; then
+		eval "${LINES}"
+	else
+		echo "Nothing to upgrade"
+	fi
+}
+
+r2pm_update() {
 	[ -z "$R2PM_DBDIR" ] && R2PM_DBDIR="${R2PM_USRDIR}/db"
 	mkdir -p "${R2PM_GITDIR}"
 	mkdir -p "${HOME}/.config"
-	cd "${R2PM_GITDIR}"
+	cd "${R2PM_GITDIR}" || return 1
 	if [ -d radare2-pm ]; then
 		cd radare2-pm
 		git reset --hard @^^
@@ -230,7 +241,7 @@ init|up|update)
 	fi
 	for a in "${R2PM_DBDIR}" "${R2PM_USRDIR}"/db2/*/db ; do
 		if [ -d "$a" ]; then
-			echo "Updating $a ..."
+			echo "[r2pm] Updating package database $a ..."
 			( cd $a ; git pull )
 		fi
 	done
@@ -245,14 +256,16 @@ init|up|update)
 	fi
 
 	ln -fs "${R2PM_GITDIR}/radare2-pm/db" "${R2PM_DBDIR}"
-	if [ "$1" = "init" ]; then
-		echo "r2pm database initialized. Use 'r2pm update' to update later today."
-	fi
+}
+
+case "$1" in
+init|up|update)
+	r2pm_update
 	exit 0
 	;;
 esac
 
-# commandline flags that work without initialized database
+# command-line flags that work without initialized database
 case "$1" in
 -v|version)
 	echo "r2pm ${R2_VERSION}"
@@ -274,8 +287,20 @@ help|-h)
 esac
 
 if [ ! -d "${R2PM_DBDIR}" ]; then
-	echo "Run 'r2pm init' to initialize the package repository"
-	exit 1
+	if [ "${R2PM_OFFLINE}" != 0 ]; then
+		echo "Run 'r2pm init' to initialize the package repository"
+		exit 1
+	else
+		r2pm init
+	fi
+else
+	# use timestamp file
+	S="${R2PM_GITDIR}"/.stamp
+	N=`date +%Y%m%d%H`
+	if [ "`cat $S 2>/dev/null`" != "$N" ]; then
+		r2pm_update > /dev/null 2>&1
+		echo $N > "$S"
+	fi
 fi
 
 mkdir -p "${R2PM_USRDIR}/pkg/"
@@ -499,6 +524,7 @@ r2pm_doc() {
 }
 
 r2pm_install() {
+	r2pm_update
 	FILE="$(pkgFilePath "$2")"
 	if [ -f "${FILE}" ]; then
 		NAME="$2"
@@ -696,6 +722,9 @@ cache)
 	echo "export PREFIX=\"${PREFIX}\"" >> "${R2PMCACHE}"
 	echo "[r2pm] r2 environment cached in ${R2PMCACHE}"
 	;;
+-U|upgrade)
+	upgradeOutdated
+	;;
 -a|add)
 	if [ "$2" = "help" ]; then
 		printf '%s\n' \
@@ -750,8 +779,8 @@ cache)
 	fi
 	eval echo "\$$2"
 	;;
-suicide)
-	commitSuicide
+purge)
+	thePurge
 	;;
 -d|doc|--doc)
 	r2pm_doc "$2"

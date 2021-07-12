@@ -278,16 +278,16 @@ R_API char *r_str_home(const char *str) {
 		}
 	}
 	length = strlen (home) + 1;
-	if (str) {
+	if (R_STR_ISNOTEMPTY (str)) {
 		length += strlen (R_SYS_DIR) + strlen (str);
 	}
-	dst = (char *)malloc (length);
+	dst = (char *)calloc (1, length);
 	if (!dst) {
 		goto fail;
 	}
 	int home_len = strlen (home);
 	memcpy (dst, home, home_len + 1);
-	if (str) {
+	if (R_STR_ISNOTEMPTY (str)) {
 		dst[home_len] = R_SYS_DIR[0];
 		strcpy (dst + home_len + 1, str);
 	}
@@ -714,6 +714,19 @@ R_API char *r_str_trunc_ellipsis(const char *str, int len) {
 		strcpy (buf + len - 4, "...");
 	}
 	return buf;
+}
+
+R_API char *r_str_newvf(const char *fmt, va_list ap) {
+	va_list ap2;
+	va_copy (ap2, ap);
+	int ret = vsnprintf (NULL, 0, fmt, ap2);
+	ret++;
+	char *p = calloc (1, ret);
+	if (p) {
+		(void)vsnprintf (p, ret, fmt, ap);
+	}
+	va_end (ap2);
+	return p;
 }
 
 R_API char *r_str_newf(const char *fmt, ...) {
@@ -1163,6 +1176,15 @@ R_API int r_str_unescape(char *buf) {
 		case 'f':
 			buf[i] = 0x0c;
 			break;
+		case '"':
+			buf[i] = '"';
+			break;
+		case '\'':
+			buf[i] = '\'';
+			break;
+		case '`':
+			buf[i] = '`';
+			break;
 		case 'x':
 			err = ch2 = ch = 0;
 			if (!buf[i + 2] || !buf[i + 3]) {
@@ -1195,8 +1217,7 @@ R_API int r_str_unescape(char *buf) {
 				}
 				esc_seq_len = 1 + num_digits;
 			} else {
-				eprintf ("Error: Unknown escape sequence.\n");
-				return 0; // -1?
+				esc_seq_len = 1;
 			}
 		}
 		memmove (buf + i + 1, buf + i + esc_seq_len, strlen (buf + i + esc_seq_len) + 1);
@@ -2585,6 +2606,43 @@ R_API const char *r_str_firstbut(const char *s, char ch, const char *but) {
 		if (isbut) {
 			idx = (int)(size_t)(isbut - but);
 			_b = R_BIT_TOGGLE (b, idx);
+			continue;
+		}
+		if (*p == ch && !_b) {
+			return p;
+		}
+	}
+	return NULL;
+}
+
+R_API const char *r_str_firstbut_escape(const char *s, char ch, const char *but) {
+	int idx, _b = 0;
+	ut8 *b = (ut8*)&_b;
+	const char *isbut, *p;
+	const int bsz = sizeof (_b) * 8;
+	if (!but) {
+		return strchr (s, ch);
+	}
+	if (strlen (but) >= bsz) {
+		eprintf ("r_str_firstbut: but string too long\n");
+		return NULL;
+	}
+	for (p = s; *p; p++) {
+		if (*p == '\\') {
+			p++;
+			if (*p == ch || strchr(but, *p)) {
+				continue;
+			} else if (!*p) {
+				break;
+			}
+		}
+		isbut = strchr (but, *p);
+		if (isbut) {
+			idx = (int)(size_t)(isbut - but);
+			_b = R_BIT_TOGGLE (b, idx);
+			if (_b && (_b & (_b - 1))) {
+				_b = R_BIT_TOGGLE (b, idx); // cancel a but char if a but is already toggle
+			}
 			continue;
 		}
 		if (*p == ch && !_b) {

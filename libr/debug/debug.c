@@ -105,6 +105,7 @@ static int r_debug_bp_hit(RDebug *dbg, RRegItem *pc_ri, ut64 pc, RBreakpointItem
 		if (!b) { /* we don't. nothing left to do */
 			/* Some targets set pc to breakpoint */
 			b = r_bp_get_at (dbg->bp, pc);
+#if __i386__ || __x86_64__
 			if (!b) {
 				/* handle the case of hw breakpoints - notify the user */
 				int drx_reg_idx = r_debug_drx_at (dbg, pc);
@@ -115,10 +116,9 @@ static int r_debug_bp_hit(RDebug *dbg, RRegItem *pc_ri, ut64 pc, RBreakpointItem
 				/* Couldn't find the break point. Nothing more to do... */
 				return true;
 			}
-			else {
-				dbg->pc_at_bp_set = true;
-				dbg->pc_at_bp = true;
-			}
+#endif
+			dbg->pc_at_bp_set = true;
+			dbg->pc_at_bp = true;
 		} else {
 			dbg->pc_at_bp_set = true;
 			dbg->pc_at_bp = false;
@@ -598,11 +598,7 @@ R_API bool r_debug_select(RDebug *dbg, int pid, int tid) {
 	if (tid < 0) {
 		tid = pid;
 	}
-	if (pid != -1 && tid != -1) {
-		if ((pid != dbg->pid || tid != dbg->tid) && dbg->verbose) {
-			eprintf ("= attach %d %d\n", pid, tid);
-		}
-	} else {
+	if (pid == -1 && tid == -1) {
 		if (dbg->pid != -1) {
 			eprintf ("Child %d is dead\n", dbg->pid);
 		}
@@ -635,6 +631,8 @@ R_API bool r_debug_select(RDebug *dbg, int pid, int tid) {
 		pc = r_debug_reg_get (dbg, "PC");
 		core->offset = pc;
 	}
+
+	dbg->main_arena_resolved = false;
 
 	return true;
 }
@@ -1320,6 +1318,9 @@ repeat:
 }
 
 R_API int r_debug_continue(RDebug *dbg) {
+	if (dbg->pid < 0) {
+		return -1;
+	}
 	return r_debug_continue_kill (dbg, 0); //dbg->reason.signum);
 }
 
@@ -1699,7 +1700,7 @@ R_API ut64 r_debug_get_baddr(RDebug *dbg, const char *file) {
 		abspath = r_file_abspath (file);
 	}
 #endif
-	if (!abspath) {
+	if (!abspath && file) {
 		abspath = strdup (file);
 	}
 	if (abspath) {

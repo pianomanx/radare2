@@ -66,7 +66,7 @@ Documentation is for weak people.
 PEBCAK ERROR: Documentation not found.
 License server overloaded (ETOOMUCHCASH)
 Error: cannot yank negative sleep
-If you're not satisfied by our product, we'll be happy to refund you.
+If you're not satisfied by our product, you may ask for a refund.
 Already up-to-date.
 How about a nice game of chess?
 THE ONLY WINNING MOVE IS NOT TO PLAY.
@@ -291,3 +291,4 @@ I like my binary stripped.
 Now 8-bit clean with better ＡＳＣＩＩ!
 Please insert disc 2 and press any key to continue...
 DOOM all the things!
+Put some sugar before the release, attracts the bugs and makes it easier to squash them

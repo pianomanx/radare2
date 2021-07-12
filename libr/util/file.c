@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2020 - pancake */
+/* radare - LGPL - Copyright 2007-2021 - pancake */
 
 #include "r_types.h"
 #include "r_util.h"
@@ -23,6 +23,12 @@
 #endif
 #if _MSC_VER
 #include <process.h>
+#endif
+
+#if __UNIX__ && !defined(__serenity__)
+#define RDWR_FLAGS O_RDWR | O_SYNC
+#else
+#define RDWR_FLAGS O_RDWR
 #endif
 
 #define BS 1024
@@ -78,11 +84,7 @@ R_API bool r_file_truncate(const char *filename, ut64 newsize) {
 	if (!r_file_exists (filename) || !r_file_is_regular (filename)) {
 		return false;
 	}
-#if __WINDOWS__
-	fd = r_sandbox_open (filename, O_RDWR, 0644);
-#else
-	fd = r_sandbox_open (filename, O_RDWR | O_SYNC, 0644);
-#endif
+	fd = r_sandbox_open (filename, RDWR_FLAGS, 0644);
 	if (fd == -1) {
 		return false;
 	}
@@ -253,7 +255,7 @@ R_API char *r_file_abspath_rel(const char *cwd, const char *file) {
 	if (!ret) {
 		ret = strdup (file);
 	}
-#if __UNIX__
+#if __UNIX__ && !__wasi__
 	char *abspath = realpath (ret, NULL);
 	if (abspath) {
 		free (ret);
@@ -278,10 +280,10 @@ R_API char *r_file_binsh(void) {
 	char *bin_sh = r_sys_getenv ("SHELL");
 	if (R_STR_ISEMPTY (bin_sh)) {
 		free (bin_sh);
-		bin_sh = r_file_path("sh");
+		bin_sh = r_file_path ("sh");
 		if (R_STR_ISEMPTY (bin_sh)) {
 			free (bin_sh);
-			bin_sh = strdup ("/bin/sh");
+			bin_sh = strdup (SHELL_PATH);
 		}
 	}
 	return bin_sh;
@@ -325,8 +327,11 @@ R_API char *r_file_path(const char *bin) {
 	return strdup (bin);
 }
 
-R_API char *r_stdin_slurp (int *sz) {
-#if __UNIX__ || __WINDOWS__
+R_API char *r_stdin_slurp(int *sz) {
+#if __wasi__
+#warning r_stdin_slurp not available for wasi
+	return NULL;
+#elif __UNIX__ || __WINDOWS__
 	int i, ret, newfd;
 	if ((newfd = dup (0)) < 0) {
 		return NULL;
@@ -390,6 +395,13 @@ R_API char *r_file_slurp(const char *str, R_NULLABLE size_t *usz) {
 		fclose (fd);
 		return NULL;
 	}
+#if __wasi__
+	fclose (fd);
+	fd = r_sandbox_fopen (str, "rb");
+	if (!fd) {
+		return NULL;
+	}
+#endif
 	if (!sz) {
 		if (r_file_is_regular (str)) {
 			char *buf = NULL;
@@ -426,14 +438,14 @@ R_API char *r_file_slurp(const char *str, R_NULLABLE size_t *usz) {
 		sz = UT16_MAX;
 	}
 	rewind (fd);
-	char *ret = (char *)malloc (sz + 1);
+	char *ret = (char *)calloc (sz + 1, 1);
 	if (!ret) {
 		fclose (fd);
 		return NULL;
 	}
 	size_t rsz = fread (ret, 1, sz, fd);
 	if (rsz != sz) {
-		eprintf ("Warning: r_file_slurp: fread: truncated read\n");
+		eprintf ("Warning: r_file_slurp: fread: truncated read (%d / %d)\n", (int)rsz, (int)sz);
 		sz = rsz;
 	}
 	fclose (fd);
@@ -881,8 +893,10 @@ err_r_file_mmap_write:
 		CloseHandle (fh);
 	}
 	return ret;
+#elif __wasi__
+	return -1;
 #elif __UNIX__
-	int fd = r_sandbox_open (file, O_RDWR|O_SYNC, 0644);
+	int fd = r_sandbox_open (file, RDWR_FLAGS, 0644);
 	const int pagesize = getpagesize ();
 	int mmlen = len + pagesize;
 	int rest = addr % pagesize;
@@ -893,13 +907,15 @@ err_r_file_mmap_write:
 	if ((st64)addr < 0) {
 		return -1;
 	}
-	mmap_buf = mmap (NULL, mmlen*2, PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)addr - rest);
+	mmap_buf = mmap (NULL, mmlen * 2, PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)addr - rest);
 	if (((int)(size_t)mmap_buf) == -1) {
 		return -1;
 	}
-	memcpy (mmap_buf+rest, buf, len);
-	msync (mmap_buf+rest, len, MS_INVALIDATE);
-	munmap (mmap_buf, mmlen*2);
+	memcpy (mmap_buf + rest, buf, len);
+#if !defined(__serenity__)
+	msync (mmap_buf + rest, len, MS_INVALIDATE);
+#endif
+	munmap (mmap_buf, mmlen * 2);
 	close (fd);
 	return len;
 #else
@@ -942,6 +958,8 @@ err_r_file_mmap_read:
 	}
 	free (file_);
 	return ret;
+#elif __wasi__
+	return 0;
 #elif __UNIX__
 	int fd = r_sandbox_open (file, O_RDONLY, 0644);
 	const int pagesize = 4096;
@@ -959,12 +977,17 @@ err_r_file_mmap_read:
 	munmap (mmap_buf, mmlen*2);
 	close (fd);
 	return len;
-#endif
+#else
 	return 0;
+#endif
 }
 
-#if __UNIX__
-static RMmap *r_file_mmap_unix (RMmap *m, int fd) {
+#if __wasi__
+static RMmap *r_file_mmap_unix(RMmap *m, int fd) {
+	return NULL;
+}
+#elif __UNIX__
+static RMmap *r_file_mmap_unix(RMmap *m, int fd) {
 	ut8 empty = m->len == 0;
 	m->buf = mmap (NULL, (empty?BS:m->len) ,
 		m->rw?PROT_READ|PROT_WRITE:PROT_READ,
@@ -1043,7 +1066,7 @@ R_API RMmap *r_file_mmap(const char *file, bool rw, ut64 base) {
 	if (!rw && !r_file_exists (file)) {
 		return m;
 	}
-	fd = r_sandbox_open (file, rw? O_RDWR: O_RDONLY, 0644);
+	fd = r_sandbox_open (file, rw? RDWR_FLAGS: O_RDONLY, 0644);
 	if (fd == -1 && !rw) {
 		eprintf ("r_file_mmap: file does not exis.\n");
 		//m->buf = malloc (m->len);
@@ -1102,7 +1125,7 @@ R_API void r_file_mmap_free(RMmap *m) {
 		return;
 	}
 	free (m->filename);
-#if __UNIX__
+#if __UNIX__ && !__wasi__
 	munmap (m->buf, m->len);
 #endif
 	close (m->fd);
@@ -1136,7 +1159,7 @@ R_API int r_file_mkstemp(R_NULLABLE const char *prefix, char **oname) {
 	}
 	if (GetTempFileName (path_, prefix_, 0, name)) {
 		char *name_ = r_sys_conv_win_to_utf8 (name);
-		h = r_sandbox_open (name_, O_RDWR|O_EXCL|O_BINARY, 0644);
+		h = r_sandbox_open (name_, RDWR_FLAGS | O_EXCL | O_BINARY, 0644);
 		if (oname) {
 			if (h != -1) {
 				*oname = name_;
@@ -1165,6 +1188,9 @@ err_r_file_mkstemp:
 	}
 
 	char *name = r_str_newf ("%s/r2.%s.XXXXXX%s", path, prefix, suffix);
+#if __wasi__
+	// nothing to do
+#else
 	mode_t mask = umask (S_IWGRP | S_IWOTH);
 	if (suffix && *suffix) {
 #if defined(__GLIBC__) && defined(__GLIBC_MINOR__) && 2 <= __GLIBC__ && 19 <= __GLIBC__MINOR__
@@ -1184,6 +1210,7 @@ err_r_file_mkstemp:
 		h = mkstemp (name);
 	}
 	umask (mask);
+#endif
 	if (oname) {
 		*oname = (h!=-1)? strdup (name): NULL;
 	}
@@ -1232,14 +1259,18 @@ R_API char *r_file_tmpdir(void) {
 	}
 	if (!path) {
 #if __ANDROID__
-		path = strdup ("/data/data/org.radare.radare2installer/radare2/tmp");
+		if (r_file_is_directory (TERMUX_PREFIX "/tmp")) {
+			path = strdup (TERMUX_PREFIX "/tmp");
+		} else {
+			path = strdup ("/data/local/tmp");
+		}
 #else
 		path = strdup ("/tmp");
 #endif
 	}
 #endif
 	if (!r_file_is_directory (path)) {
-		eprintf ("Cannot find temporary directory '%s'\n", path);
+		eprintf ("Cannot find dir.tmp '%s'\n", path);
 	}
 	return path;
 }
@@ -1322,23 +1353,20 @@ R_API RList *r_file_lsrf(const char *dir) {
 }
 
 
-static void recursive_search_glob(const char *path, const char *glob, RList* list, int depth) {
+static void recursive_glob(const char *path, const char *glob, RList* list, int depth) {
 	if (depth < 1) {
 		return;
 	}
 	char* file;
 	RListIter *iter;
-	RList *dir = r_sys_dir (path);
-	r_list_foreach (dir, iter, file) {
+	RList *files = r_sys_dir (path);
+	r_list_foreach (files, iter, file) {
 		if (!strcmp (file, ".") || !strcmp (file, "..")) {
 			continue;
 		}
-		char *filename = malloc (strlen (path) + strlen (file) + 2);
-		strcpy (filename, path);
-		strcat (filename, file);
+		char *filename = r_str_newf ("%s%s", path, file);
 		if (r_file_is_directory (filename)) {
-			strcat (filename, R_SYS_DIR);
-			recursive_search_glob (filename, glob, list, depth - 1);
+			recursive_glob (filename, glob, list, depth - 1);
 			free (filename);
 		} else if (r_str_glob (file, glob)) {
 			r_list_append (list, filename);
@@ -1346,10 +1374,10 @@ static void recursive_search_glob(const char *path, const char *glob, RList* lis
 			free (filename);
 		}
 	}
-	r_list_free (dir);
+	r_list_free (files);
 }
 
-R_API RList* r_file_globsearch(const char *_globbed_path, int maxdepth) {
+R_API RList* r_file_glob(const char *_globbed_path, int maxdepth) {
 	char *globbed_path = strdup (_globbed_path);
 	RList *files = r_list_newf (free);
 	char *glob = strchr (globbed_path, '*');
@@ -1381,9 +1409,9 @@ R_API RList* r_file_globsearch(const char *_globbed_path, int maxdepth) {
 		}
 
 		if (*(glob + 1) == '*') {  // "**"
-			recursive_search_glob (path, glob_ptr, files, maxdepth);
-		} else {                   // "*"
-			recursive_search_glob (path, glob_ptr, files, 1);
+			recursive_glob (path, glob_ptr, files, maxdepth);
+		} else {            // "*"
+			recursive_glob (path, glob_ptr, files, 1);
 		}
 		free (path);
 	}

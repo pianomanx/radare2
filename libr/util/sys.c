@@ -58,10 +58,12 @@ int proc_pidpath(int pid, void * buffer, ut32 buffersize);
 #endif
 #if __UNIX__
 # include <sys/utsname.h>
-# include <sys/wait.h>
 # include <sys/stat.h>
 # include <errno.h>
+#ifndef __wasi__
 # include <pwd.h>
+# include <sys/wait.h>
+#endif
 # include <signal.h>
 extern char **environ;
 
@@ -152,6 +154,10 @@ R_API int r_sys_fork(void) {
 #if __WINDOWS__
 R_API int r_sys_sigaction(int *sig, void (*handler) (int)) {
 	return -1;
+}
+#elif __wasi__
+R_API int r_sys_sigaction(int *sig, void (*handler)(int)) {
+	return 0;
 }
 #elif HAVE_SIGACTION
 R_API int r_sys_sigaction(int *sig, void (*handler) (int)) {
@@ -444,7 +450,7 @@ static void signal_handler(int signum) {
 	if (!crash_handler_cmd) {
 		return;
 	}
-	snprintf (cmd, sizeof(cmd) - 1, crash_handler_cmd, getpid ());
+	snprintf (cmd, sizeof(cmd) - 1, crash_handler_cmd, r_sys_getpid ());
 	r_sys_backtrace ();
 	exit (r_sys_cmd (cmd));
 }
@@ -614,7 +620,7 @@ R_API int r_sys_thp_mode(void) {
 #endif
 }
 
-#if __UNIX__
+#if __UNIX__ && HAVE_SYSTEM
 R_API int r_sys_cmd_str_full(const char *cmd, const char *input, int ilen, char **output, int *len, char **sterr) {
 	char *mysterr = NULL;
 	if (!sterr) {
@@ -1094,10 +1100,15 @@ R_API char *r_sys_pid_to_path(int pid) {
 		eprintf ("r_sys_pid_to_path: Cannot open process.\n");
 		return NULL;
 	}
-	DWORD length = GetModuleFileNameEx (processHandle, NULL, filename, maxlength);
+	DWORD length = 0;
+	if (w32_GetModuleFileNameEx) {
+		length = w32_GetModuleFileNameEx (processHandle, NULL, filename, maxlength);
+	}
 	if (length == 0) {
 		// Upon failure fallback to GetProcessImageFileName
-		length = GetProcessImageFileName (processHandle, filename, maxlength);
+		if (w32_GetProcessImageFileName) {
+			length = w32_GetProcessImageFileName (processHandle, filename, maxlength);
+		}
 		CloseHandle (processHandle);
 		if (length == 0) {
 			eprintf ("r_sys_pid_to_path: Error calling GetProcessImageFileName\n");
@@ -1252,6 +1263,8 @@ R_API char *r_sys_whoami(void) {
 	if (!GetUserName (buf, (LPDWORD)&buf_sz) ) {
 		return strdup ("?");
 	}
+#elif __wasi__
+	strcpy (buf, "user");
 #else
 	struct passwd *pw = getpwuid (getuid ());
 	if (pw) {
@@ -1270,13 +1283,17 @@ R_API int r_sys_uid(void) {
 	if (!GetUserName (buf, (LPDWORD)&buf_sz) ) {
 		return strdup ("?");
 	}
+#elif __wasi__
+	return 0;
 #else
 	return getuid ();
 #endif
 }
 
 R_API int r_sys_getpid(void) {
-#if __UNIX__
+#if __wasi__
+	return 0;
+#elif __UNIX__
 	return getpid ();
 #elif __WINDOWS__
 	return GetCurrentProcessId();

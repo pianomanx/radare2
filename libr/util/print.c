@@ -1266,6 +1266,14 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 					}
 					ut8 ch = (use_unalloc && p && !p->iob.is_valid_offset (p->iob.io, addr + j, false))
 						? ' ' : buf[j];
+					if (p->charset && p->charset->loaded) {
+						ut8 input[2] = {ch, 0};
+						ut8 output[32];
+						size_t len = r_charset_encode_str (p->charset, output, sizeof (output), input, 1);
+						if (len > 0) {
+							ch = *output;
+						}
+					}
 					r_print_byte (p, "%c", j, ch);
 					bytes++;
 				}
@@ -1306,6 +1314,7 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 					free (rstr);
 				}
 			}
+			bool first = true; 
 			if (!eol && p && p->use_comments) {
 				for (; j < i + inc; j++) {
 					print (" ");
@@ -1332,7 +1341,33 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 						} else {
 							a = "";
 						}
-						printfmt ("%s  ; %s", a, comment);
+						if (strchr (comment, '\n')) {
+							char *s = strdup (comment);
+							char *q = s;
+							while (true) {
+								char *nl = strchr (q, '\n');
+								if (nl) {
+									*nl = 0;
+								}
+								if (first) {
+									printfmt ("%s 2; %s", a, q);
+									first = false;
+								} else {
+									const char *a = r_str_pad (' ', 8 + (p->cols * 4));
+									printfmt ("%s; %s", a, q);
+								}
+						// 		p->cb_printf ("\n");
+
+								if (!nl) {
+									break;
+								}
+								q = nl + 1;
+							}
+							free (s);
+						} else {
+							printfmt ("%s ; %s", a, comment);
+							// p->cb_printf ("\n");
+						}
 						free (comment);
 					}
 				}
@@ -1485,7 +1520,12 @@ R_API void r_print_bytes(RPrint *p, const ut8 *buf, int len, const char *fmt) {
 }
 
 R_API void r_print_raw(RPrint *p, ut64 addr, const ut8 *buf, int len, int offlines) {
-	if (offlines == 2) {
+	switch (offlines) {
+	case 0:
+		p->write (buf, len);
+		break;
+	case 2:
+	{
 		int i, j, cols = p->cols * 4;
 		char ch;
 		for (i = 0; i < len; i += cols) {
@@ -1505,10 +1545,14 @@ R_API void r_print_raw(RPrint *p, ut64 addr, const ut8 *buf, int len, int offlin
 			}
 			p->cb_printf ("\n");
 		}
-	} else if (offlines) {
+		break;
+	}
+	default:
+	{
 		const ut8 *o, *q;
 		ut64 off;
-		int i, linenum_abs, mustbreak = 0, linenum = 1;
+		bool mustbreak;
+		int i, linenum_abs, linenum = 1;
 		o = q = buf;
 		i = 0;
 		do {
@@ -1533,8 +1577,8 @@ R_API void r_print_raw(RPrint *p, ut64 addr, const ut8 *buf, int len, int offlin
 			o = ++q;
 			i++;
 		} while (!mustbreak);
-	} else {
-		p->write (buf, len);
+		break;
+	}
 	}
 }
 

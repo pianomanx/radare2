@@ -19,6 +19,7 @@ static const char *help_msg_m[] = {
 	"mp", "", "List all supported partition types",
 	"ms", " /mnt", "Open filesystem prompt at /mnt",
 	"mw", " [file] [data]", "Write data into file", // TODO: add mwf
+	"mwf", " [diskfile] [r2filepath]", "Write contents of local diskfile into r2fs mounted path",
 	"my", "", "Yank contents of file into clipboard",
 	//"TODO: support multiple mountpoints and RFile IO's (need io+core refactorn",
 	NULL
@@ -217,7 +218,7 @@ static int cmd_mount(void *data, const char *_input) {
 		}
 		break;
 	case 'l': // "ml"
-	case 'd': // "md" 
+	case 'd': // "md"
 		cmd_mount_ls (core, input + 1);
 		break;
 	case 'p':
@@ -319,7 +320,7 @@ static int cmd_mount(void *data, const char *_input) {
 			ptr = "./";
 		}
 		const char *filename = r_str_trim_head_ro (input);
-	
+
 		file = r_fs_open (core->fs, filename, false);
 		if (file) {
 			char *localFile = strdup (filename);
@@ -428,8 +429,29 @@ static int cmd_mount(void *data, const char *_input) {
 			R_FREE (cwd);
 		}
 		break;
-	case 'w':
-		if (input[1] == ' ') {
+	case 'w': // "mw"
+		if (input[1] == 'f') { // "mwf"
+			char *arg0 = r_str_trim_dup (input + 1);
+			char *arg1 = strchr (arg0, ' ');
+			if (arg1) {
+				*arg1++ = 0;
+			} else {
+				eprintf ("Usage: mwf [local] [dest]\n");
+				free (arg0);
+				break;
+			}
+			size_t size = 0;
+			char *data = r_file_slurp (arg0, &size);
+			RFSFile *f = r_fs_open (core->fs, arg1, true);
+			if (f) {
+				r_fs_write (core->fs, f, 0, (const ut8 *)data, size);
+				r_fs_close (core->fs, f);
+				r_fs_file_free (f);
+			} else {
+				eprintf ("Cannot write\n");
+			}
+			free (arg0);
+		} else if (input[1] == ' ') {
 			char *args = r_str_trim_dup (input + 1);
 			char *arg = strchr (args, ' ');
 			if (arg) {

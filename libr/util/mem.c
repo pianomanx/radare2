@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2020 - pancake */
+/* radare - LGPL - Copyright 2007-2021 - pancake */
 
 #include <r_util.h>
 #if __UNIX__
@@ -211,6 +211,18 @@ R_API void r_mem_swapendian(ut8 *dest, const ut8 *orig, int size) {
 	}
 }
 
+R_API void r_mem_swap(ut8 *buf, size_t buf_len) {
+	size_t pos = 0;
+	buf_len--;
+	while (pos < buf_len) {
+		int x = buf[pos];
+		buf[pos] = buf[buf_len];
+		buf[buf_len] = x;
+		pos++;
+		buf_len--;
+	}
+}
+
 // R_DOC r_mem_mem: Finds the needle of nlen size into the haystack of hlen size
 // R_UNIT printf("%s\n", r_mem_mem("food is pure lame", 20, "is", 2));
 R_API const ut8 *r_mem_mem(const ut8 *haystack, int hlen, const ut8 *needle, int nlen) {
@@ -246,8 +258,10 @@ R_API const ut8 *r_mem_mem_aligned(const ut8 *haystack, int hlen, const ut8 *nee
 	return NULL;
 }
 
-R_API int r_mem_protect(void *ptr, int size, const char *prot) {
-#if __UNIX__
+R_API bool r_mem_protect(void *ptr, int size, const char *prot) {
+#if __wasi__
+	return false;
+#elif __UNIX__
 	int p = 0;
 	if (strchr (prot, 'x')) {
 		p |= PROT_EXEC;
@@ -358,7 +372,7 @@ R_API void *r_mem_mmap_resize(RMmap *m, ut64 newsize) {
 	if (m->buf) {
 		UnmapViewOfFile (m->buf);
 	}
-#elif __UNIX__
+#elif __UNIX__ && !__wasi__
 	if (munmap (m->buf, m->len) != 0) {
 		return NULL;
 	}

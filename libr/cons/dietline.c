@@ -13,7 +13,9 @@
 static int r_line_readchar_win(ut8 *s, int slen);
 #else
 #include <sys/ioctl.h>
+#ifndef HAVE_PTY
 #include <termios.h>
+#endif
 #include <signal.h>
 #define USE_UTF8 1
 #endif
@@ -936,7 +938,6 @@ static inline void delete_till_end(void) {
 static void __print_prompt(void) {
         RCons *cons = r_cons_singleton ();
 	int columns = r_cons_get_size (NULL) - 2;
-	int chars = R_MAX (1, strlen (I.buffer.data));
 	int len, i, cols = R_MAX (1, columns - r_str_ansi_len (I.prompt) - 2);
 	if (cons->line->prompt_type == R_LINE_PROMPT_OFFSET) {
                 r_cons_gotoxy (0,  cons->rows);
@@ -948,7 +949,9 @@ static void __print_prompt(void) {
 	} else {
 		printf ("\r%s", I.prompt);
 	}
-	fwrite (I.buffer.data, 1, R_MIN (cols, chars), stdout);
+	if (I.buffer.length > 0) {
+		fwrite (I.buffer.data, I.buffer.length, 1, stdout);
+	}
 	printf ("\r%s", I.prompt);
 	if (I.buffer.index > cols) {
 		printf ("< ");
@@ -1108,7 +1111,7 @@ static void __vi_mode(void) {
 		if (I.echo) {
 			__print_prompt ();
 		}
-		if (I.vi_mode != CONTROL_MODE) {	// exit if insert mode is selected
+		if (I.vi_mode != CONTROL_MODE) { // exit if insert mode is selected
 			__update_prompt_color ();
 			break;
 		}

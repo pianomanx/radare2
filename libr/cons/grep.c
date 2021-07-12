@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2020 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2021 - pancake, nibble */
 
 #include <r_cons.h>
 #include <r_util/r_print.h>
@@ -35,6 +35,7 @@ static const char *help_detail_tilde[] = {
 	" :s..e",    "", "show lines s-e",
 	" ..",       "", "internal 'less'",
 	" ...",      "", "internal 'hud' (like V_)",
+	" ....",     "", "internal 'hud' in one line",
 	" {:",       "", "human friendly indentation (yes, it's a smiley)",
 	" {:..",     "", "less the output of {:",
 	" {:...",    "", "hud the output of {:",
@@ -59,11 +60,6 @@ static const char *help_detail_tilde[] = {
 	NULL
 };
 
-/* TODO: remove globals */
-static RList *sorted_lines = NULL;
-static RList *unsorted_lines = NULL;
-static int sorted_column = -1;
-
 R_API void r_cons_grep_help(void) {
 	r_cons_cmd_help (help_detail_tilde, true);
 }
@@ -77,9 +73,10 @@ static void parse_grep_expression(const char *str) {
 	ut64 range_begin, range_end;
 	size_t ptrs_length;
 
-	if (!str || !*str) {
+	if (R_STR_ISEMPTY (str)) {
 		return;
 	}
+	RConsContext *ctx = r_cons_singleton()->context;
 	RCons *cons = r_cons_singleton ();
 	RConsGrep *grep = &cons->context->grep;
 
@@ -115,7 +112,7 @@ static void parse_grep_expression(const char *str) {
 	free (grep->str);
 	grep->str = NULL;
 	bool first = true;
-	sorted_column = 0;
+	ctx->sorted_column = 0;
 	size_t i;
 	for (i = 0; i < ptrs_length; i++) {
 		ptr = ptrs[i];
@@ -125,7 +122,11 @@ static void parse_grep_expression(const char *str) {
 			case '.':
 				if (ptr[1] == '.') {
 					if (ptr[2] == '.') {
-						grep->less = 2;
+						if (ptr[3] == '.') {
+							grep->less = 3;
+						} else {
+							grep->less = 2;
+						}
 					} else {
 						grep->less = 1;
 					}
@@ -358,7 +359,7 @@ static void parse_grep_expression(const char *str) {
 	}
 }
 
-// Finds and returns next intgerp expression,
+// Finds and returns next intgrep expression,
 // unescapes escaped twiddles
 static char *find_next_intgrep(char *cmd, const char *quotes) {
 	char *p;
@@ -454,13 +455,14 @@ static int cmp(const void *a, const void *b) {
 	if (!a || !b) {
 		return (int) (size_t) ((char *) a - (char *) b);
 	}
-	if (sorted_column > 0) {
+	RConsContext *ctx = r_cons_singleton()->context;
+	if (ctx->sorted_column > 0) {
 		da = strdup (ca);
 		db = strdup (cb);
 		int colsa = r_str_word_set0 (da);
 		int colsb = r_str_word_set0 (db);
-		ca = (colsa > sorted_column)? r_str_word_get0 (da, sorted_column): "";
-		cb = (colsb > sorted_column)? r_str_word_get0 (db, sorted_column): "";
+		ca = (colsa > ctx->sorted_column)? r_str_word_get0 (da, ctx->sorted_column): "";
+		cb = (colsb > ctx->sorted_column)? r_str_word_get0 (db, ctx->sorted_column): "";
 	}
 	if (IS_DIGIT (*ca) && IS_DIGIT (*cb)) {
 		ut64 na = r_num_get (NULL, ca);
@@ -495,7 +497,7 @@ R_API void r_cons_grepbuf(void) {
 		return;
 	}
 
-	if ((!len || !buf || buf[0] == '\0') && (grep->json || grep->less)) {
+	if ((!len || !buf || !*buf) && (grep->json || grep->less)) {
 		grep->json = 0;
 		grep->less = 0;
 		grep->hud = 0;
@@ -565,7 +567,13 @@ R_API void r_cons_grepbuf(void) {
 	if (grep->less) {
 		int less = grep->less;
 		grep->less = 0;
-		if (less == 2) {
+		if (less == 3) {
+			char *res = r_cons_hud_line_string (buf);
+			if (res) {
+				r_cons_println (res);
+				free (res);
+			}
+		} else if (less == 2) {
 			char *res = r_cons_hud_string (buf);
 			if (res) {
 				r_cons_println (res);
@@ -728,22 +736,25 @@ R_API void r_cons_grepbuf(void) {
 		int nl = 0;
 		char *ptr = cons->context->buffer;
 		char *str;
-		sorted_column = grep->sort;
-		r_list_sort (sorted_lines, cmp);
+		RConsContext *ctx = cons->context;
+		ctx->sorted_column = grep->sort;
+
+		r_list_sort (ctx->sorted_lines, cmp);
 		if (grep->sort_invert) {
-			r_list_reverse (sorted_lines);
+			r_list_reverse (ctx->sorted_lines);
 		}
-		INSERT_LINES (unsorted_lines);
-		INSERT_LINES (sorted_lines);
+		INSERT_LINES (ctx->unsorted_lines);
+		INSERT_LINES (ctx->sorted_lines);
 		cons->lines = nl;
-		r_list_free (sorted_lines);
-		sorted_lines = NULL;
-		r_list_free (unsorted_lines);
-		unsorted_lines = NULL;
+		r_list_free (ctx->sorted_lines);
+		ctx->sorted_lines = NULL;
+		r_list_free (ctx->unsorted_lines);
+		ctx->unsorted_lines = NULL;
 	}
 }
 
 R_API int r_cons_grep_line(char *buf, int len) {
+	r_return_val_if_fail (buf && len >= 0, 0);
 	RCons *cons = r_cons_singleton ();
 	RConsGrep *grep = &cons->context->grep;
 	const char *delims = " |,;=\t";
@@ -779,11 +790,12 @@ R_API int r_cons_grep_line(char *buf, int len) {
 				ampfail = 0;
 				continue;
 			}
-			if (grep->begin) {
-				hit = (p == in);
-			} else {
-				hit = !grep->neg;
-			}
+			hit = grep->begin
+				? grep->neg
+					? p != in
+					: p == in
+				: !grep->neg;
+
 			// TODO: optimize without strlen without breaking t/feat_grep (grep end)
 			if (grep->end && (strlen (grep->strings[i]) != strlen (p))) {
 				hit = 0;
@@ -799,6 +811,7 @@ R_API int r_cons_grep_line(char *buf, int len) {
 		hit = 1;
 	}
 
+	RConsContext *ctx = r_cons_singleton()->context;
 	if (hit) {
 		if (!grep->range_line) {
 			if (grep->line == cons->lines) {
@@ -851,16 +864,16 @@ R_API int r_cons_grep_line(char *buf, int len) {
 	if (grep->sort != -1) {
 		char ch = buf[len];
 		buf[len] = 0;
-		if (!sorted_lines) {
-			sorted_lines = r_list_newf (free);
+		if (!ctx->sorted_lines) {
+			ctx->sorted_lines = r_list_newf (free);
 		}
-		if (!unsorted_lines) {
-			unsorted_lines = r_list_newf (free);
+		if (!ctx->unsorted_lines) {
+			ctx->unsorted_lines = r_list_newf (free);
 		}
 		if (cons->lines >= grep->sort_row) {
-			r_list_append (sorted_lines, strdup (buf));
+			r_list_append (ctx->sorted_lines, strdup (buf));
 		} else {
-			r_list_append (unsorted_lines, strdup (buf));
+			r_list_append (ctx->unsorted_lines, strdup (buf));
 		}
 		buf[len] = ch;
 	}
@@ -869,6 +882,7 @@ R_API int r_cons_grep_line(char *buf, int len) {
 }
 
 R_API void r_cons_grep(const char *grep) {
+	r_return_if_fail (grep);
 	parse_grep_expression (grep);
 	r_cons_grepbuf ();
 }

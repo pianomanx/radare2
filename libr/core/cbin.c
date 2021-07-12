@@ -683,9 +683,34 @@ static void sdb_concat_by_path(Sdb *s, const char *path) {
 	sdb_free (db);
 }
 
+static void load_types_from(RCore *core, const char *fmt, ...) {
+	const char *dir_prefix = r_config_get (core->config, "dir.prefix");
+	va_list ap;
+	va_start (ap, fmt);
+	char *s = r_str_newvf (fmt, ap);
+	SdbGperf *gp = r_anal_get_gperf_types (s);
+	if (gp) {
+#if HAVE_GPERF
+		Sdb *gd = sdb_new0 ();
+		sdb_open_gperf (gd, gp);
+		sdb_reset (core->anal->sdb_types);
+		sdb_merge (core->anal->sdb_types, gd);
+		sdb_close (gd);
+		sdb_free (gd);
+#endif
+	} else {
+		char *dbpath = r_str_newf ("%s/%s/%s.sdb", dir_prefix, R2_SDB_FCNSIGN, s);
+		if (r_file_exists (dbpath)) {
+			sdb_concat_by_path (core->anal->sdb_types, dbpath);
+		}
+		free (dbpath);
+	}
+	free (s);
+	va_end (ap);
+}
+
 R_API void r_core_anal_type_init(RCore *core) {
 	r_return_if_fail (core && core->anal);
-	const char *dir_prefix = r_config_get (core->config, "dir.prefix");
 	int bits = core->rasm->bits;
 	Sdb *types = core->anal->sdb_types;
 	// make sure they are empty this is initializing
@@ -694,45 +719,14 @@ R_API void r_core_anal_type_init(RCore *core) {
 	const char *os = r_config_get (core->config, "asm.os");
 	// spaguetti ahead
 
-	const char *dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types.sdb"), dir_prefix);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s.sdb"),
-		dir_prefix, anal_arch);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s.sdb"),
-		dir_prefix, os);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%d.sdb"),
-		dir_prefix, bits);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s-%d.sdb"),
-		dir_prefix, os, bits);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s-%d.sdb"),
-		dir_prefix, anal_arch, bits);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s-%s.sdb"),
-		dir_prefix, anal_arch, os);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
-	dbpath = sdb_fmt (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "types-%s-%s-%d.sdb"),
-		dir_prefix, anal_arch, os, bits);
-	if (r_file_exists (dbpath)) {
-		sdb_concat_by_path (types, dbpath);
-	}
+	load_types_from (core, "types");
+	load_types_from (core, "types-%s", anal_arch);
+	load_types_from (core, "types-%s", os);
+	load_types_from (core, "types-%d", bits);
+	load_types_from (core, "types-%s-%d", os, bits);
+	load_types_from (core, "types-%s-%d", anal_arch, bits);
+	load_types_from (core, "types-%s-%s", anal_arch, os);
+	load_types_from (core, "types-%s-%s-%d", anal_arch, os, bits);
 }
 
 R_API void r_core_anal_cc_init(RCore *core) {
@@ -743,6 +737,20 @@ R_API void r_core_anal_cc_init(RCore *core) {
 	if (!anal_arch) {
 		return;
 	}
+#if HAVE_GPERF
+	char *k = r_str_newf ("cc_%s_%d", anal_arch, bits);
+	SdbGperf *gp = r_anal_get_gperf_cc (k);
+	free (k);
+	if (gp) {
+		Sdb *gd = sdb_new0 ();
+		sdb_open_gperf (gd, gp);
+		sdb_reset (core->anal->sdb_cc);
+		sdb_merge (core->anal->sdb_cc, gd);
+		sdb_close (gd);
+		sdb_free (gd);
+		return;
+	}
+#endif
 	char *dbpath = r_str_newf (R_JOIN_3_PATHS ("%s", R2_SDB_FCNSIGN, "cc-%s-%d.sdb"),
 		dir_prefix, anal_arch, bits);
 	char *dbhomepath = r_str_newf (R_JOIN_3_PATHS ("~", R2_HOME_SDB_FCNSIGN, "cc-%s-%d.sdb"),
@@ -775,7 +783,7 @@ R_API void r_core_anal_cc_init(RCore *core) {
 		sdb_concat_by_path (cc, dbpath);
 		cc->path = strdup (dbpath);
 	}
-	if (sdb_isempty (core->anal->sdb_cc)) {
+	if (anal_arch && sdb_isempty (core->anal->sdb_cc)) {
 		eprintf ("Warning: Missing calling conventions for '%s'. Deriving it from the regprofile.\n", anal_arch);
 	}
 	free (dbpath);
@@ -795,8 +803,6 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 		return false;
 	}
 	RBinObject *obj = bf->o;
-	const char *compiled = NULL;
-	bool havecode;
 
 	if (!info || !obj) {
 		if (IS_MODE_JSON (mode)) {
@@ -806,8 +812,8 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 		}
 		return false;
 	}
-	havecode = is_executable (obj) | (obj->entries != NULL);
-	compiled = get_compile_time (bf->sdb);
+	bool havecode = is_executable (obj) | (obj->entries != NULL);
+	const char *compiled = get_compile_time (bf->sdb);
 
 	if (IS_MODE_SET (mode)) {
 		r_config_set (r->config, "file.type", info->rclass);
@@ -835,10 +841,6 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 			r_config_set (r->config, "asm.bits", str);
 			r_config_set (r->config, "asm.dwarf",
 				(R_BIN_DBG_STRIPPED & info->dbg_info) ? "false" : "true");
-			v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
-			if (v != -1) {
-				r_config_set_i (r->config, "asm.pcalign", v);
-			}
 		}
 		r_core_anal_type_init (r);
 		r_core_anal_cc_init (r);
@@ -853,18 +855,6 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 		r_cons_printf ("bits %d\n", info->bits);
 		r_cons_printf ("os %s\n", info->os);
 		r_cons_printf ("endian %s\n", info->big_endian? "big": "little");
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
-		if (v != -1) {
-			r_cons_printf ("minopsz %d\n", v);
-		}
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
-		if (v != -1) {
-			r_cons_printf ("maxopsz %d\n", v);
-		}
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
-		if (v != -1) {
-			r_cons_printf ("pcalign %d\n", v);
-		}
 	} else if (IS_MODE_RAD (mode)) {
 		if (info->type && !strcmp (info->type, "fs")) {
 			r_cons_printf ("e file.type=fs\n");
@@ -876,6 +866,8 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 				r_str_bool (info->big_endian),
 				info->bits,
 				r_str_bool (R_BIN_DBG_STRIPPED &info->dbg_info));
+			int v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
+			r_cons_printf ("e asm.pcalign=%d\n", (v > 0)? v: 0);
 			if (info->lang && *info->lang) {
 				r_cons_printf ("e bin.lang=%s\n", info->lang);
 			}
@@ -894,10 +886,6 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 			}
 			if (info->default_cc) {
 				r_cons_printf ("e anal.cc=%s", info->default_cc);
-			}
-			v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
-			if (v != -1) {
-				r_cons_printf ("e asm.pcalign=%d\n", v);
 			}
 		}
 	} else {
@@ -947,24 +935,12 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 		pair_bool (pj, "linenum", R_BIN_DBG_LINENUMS & info->dbg_info);
 		pair_bool (pj, "lsyms", R_BIN_DBG_SYMS & info->dbg_info);
 		pair_str (pj, "machine", info->machine);
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
-		if (v != -1) {
-			pair_int (pj, "maxopsz", v);
-		}
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
-		if (v != -1) {
-			pair_int (pj, "minopsz", v);
-		}
 		pair_bool (pj, "nx", info->has_nx);
 		pair_str (pj, "os", info->os);
 		if (info->rclass && !strcmp (info->rclass, "pe")) {
 			pair_bool (pj, "overlay", info->pe_overlay);
 		}
 		pair_str (pj, "cc", info->default_cc);
-		v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
-		if (v != -1) {
-			pair_int (pj, "pcalign", v);
-		}
 		pair_bool (pj, "pic", info->has_pi);
 		pair_bool (pj, "relocs", R_BIN_DBG_RELOCS & info->dbg_info);
 		Sdb *sdb_info = sdb_ns (obj->kv, "info", false);
@@ -978,7 +954,7 @@ static int bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 			//this should be moved if added to mach0 (or others)
 			pair_bool (pj, "signed", info->signature);
 		}
-		pair_bool (pj, "sanitiz", info->has_sanitizers);
+		pair_bool (pj, "sanitize", info->has_sanitizers);
 		pair_bool (pj, "static", r_bin_is_static (r->bin));
 		if (info->rclass && !strcmp (info->rclass, "mdmp")) {
 			v = sdb_num_get (bf->sdb, "mdmp.streams", 0);
@@ -1129,6 +1105,7 @@ static int bin_dwarf(RCore *core, PJ *pj, int mode) {
 		pj_a (pj);
 	}
 
+	SetP *set = set_p_new ();
 	//TODO we should need to store all this in sdb, or do a filecontentscache in libr/util
 	//XXX this whole thing has leaks
 	r_list_foreach (list, iter, row) {
@@ -1140,10 +1117,13 @@ static int bin_dwarf(RCore *core, PJ *pj, int mode) {
 			const char *path = row->file;
 			FileLines *current_lines = ht_pp_find (file_lines, path, NULL);
 			if (!current_lines) {
-				current_lines = read_file_lines (path);
-				if (!ht_pp_insert (file_lines, path, current_lines)) {
-					file_lines_free (current_lines);
-					current_lines = NULL;
+				if (!set_p_contains (set, (void*)path)) {
+					set_p_add (set, (void*)path);
+					current_lines = read_file_lines (path);
+					if (!ht_pp_insert (file_lines, path, current_lines)) {
+						file_lines_free (current_lines);
+						current_lines = NULL;
+					}
 				}
 			}
 			char *line = NULL;
@@ -1214,6 +1194,7 @@ static int bin_dwarf(RCore *core, PJ *pj, int mode) {
 	if (IS_MODE_JSON(mode)) {
 		pj_end (pj);
 	}
+	set_p_free (set);
 	r_cons_break_pop ();
 	ht_pp_free (file_lines);
 	r_list_free (ownlist);

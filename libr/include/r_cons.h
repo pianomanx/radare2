@@ -28,9 +28,11 @@ extern "C" {
 #include <sys/stat.h>
 #include <fcntl.h>
 #if __UNIX__
+#ifndef __wasi__
 #include <termios.h>
-#include <sys/ioctl.h>
 #include <sys/wait.h>
+#endif
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #endif
 #if __WINDOWS__
@@ -405,6 +407,10 @@ typedef struct r_cons_context_t {
 	int color_mode;
 	RConsPalette cpal;
 	RConsPrintablePalette pal;
+
+	RList *sorted_lines;
+	RList *unsorted_lines;
+	int sorted_column; // -1
 } RConsContext;
 
 #define HUD_BUF_SIZE 512
@@ -430,6 +436,7 @@ typedef struct r_cons_t {
 	int fix_columns;
 	bool break_lines;
 	int noflush;
+	int optimize;
 	bool show_autocomplete_widget;
 	FILE *fdin; // FILE? and then int ??
 	int fdout; // only used in pipe.c :?? remove?
@@ -448,7 +455,7 @@ typedef struct r_cons_t {
 	RConsFunctionKey cb_fkey;
 
 	void *user; // Used by <RCore*>
-#if __UNIX__
+#if __UNIX__ && !__wasi__
 	struct termios term_raw, term_buf;
 #elif __WINDOWS__
 	DWORD term_raw, term_buf, term_xterm;
@@ -915,6 +922,8 @@ R_API void r_cons_rainbow_new(RConsContext *ctx, int sz);
 
 R_API int r_cons_fgets(char *buf, int len, int argc, const char **argv);
 R_API char *r_cons_hud(RList *list, const char *prompt);
+R_API char *r_cons_hud_line(RList *list, const char *prompt);
+R_API char *r_cons_hud_line_string(const char *s);
 R_API char *r_cons_hud_path(const char *path, int dir);
 R_API char *r_cons_hud_string(const char *s);
 R_API char *r_cons_hud_file(const char *f);

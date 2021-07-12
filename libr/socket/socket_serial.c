@@ -1,7 +1,9 @@
-/* radare - LGPL - Copyright 2017 - pancake */
+/* radare - LGPL - Copyright 2017-2021 - pancake */
 
 #include <r_socket.h>
-#if __UNIX__
+#include <r_util/r_sandbox.h>
+
+#if __UNIX__ && !__wasi__
 
 #include <errno.h>
 #include <string.h>
@@ -45,7 +47,7 @@ static int set_interface_attribs (int fd, int speed, int parity) {
 }
 
 R_API int r_socket_connect_serial(RSocket *sock, const char *path, int speed, int parity) {
-	int fd = open (path, O_RDWR | O_SYNC | O_BINARY, 0); // O_NOCTY
+	int fd = r_sandbox_open (path, O_RDWR | O_BINARY, 0); // O_NOCTY
 	if (fd == -1) {
 		return -1;
 	}

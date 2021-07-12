@@ -159,7 +159,7 @@ anal_plugins += [
   'sh',
   'snes',
   'sparc_cs',
-  'sysz',
+  's390_cs',
   'tms320',
   #'tms320c64x',
   'tricore',
@@ -215,7 +215,7 @@ asm_plugins += [
   'sh',
   'snes',
   'sparc_cs',
-  'sysz',
+  's390_cs',
   'tms320',
   'tms320c64x',
   'tricore',
@@ -244,6 +244,7 @@ if no_user_plugins
       'mips_gnu',
       'ppc_gnu',
       'sparc_gnu',
+      's390_gnu',
       'v850_gnu',
     ]
     anal_plugins += [
@@ -414,7 +415,8 @@ io_plugins += [
   'self',
   'shm',
   'sparse',
-  'tcp',
+  'socket',
+  'tcpslurp',
   'winkd',
   'winedbg',
   'zip'
@@ -430,13 +432,19 @@ if host_machine.system() == 'windows'
 endif
 
 lang_plugins += [
+  'v',
+  'lib',
+  'spp',
   'rust',
+  'go',
+  'zig',
+  'c',
   'vala'
 ]
 
 if host_machine.system() != 'windows'
   lang_plugins += [
-    'c',
+    'pipe',
     'cpipe'
   ]
 endif
@@ -565,6 +573,7 @@ r_util_files = [
   'include/r_util/r_time.h',
   'include/r_util/r_tree.h',
   'include/r_util/r_uleb128.h',
+  'include/r_util/r_w32.h',
   'include/r_util/r_utf16.h',
   'include/r_util/r_utf32.h',
   'include/r_util/r_utf8.h',
