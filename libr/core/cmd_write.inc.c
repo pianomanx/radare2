@@ -1653,7 +1653,7 @@ static int cmd_wget(RCore *core, const char *input) {
 		fname ++;
 	}
 	int len = 0;
-	char *data = r_socket_http_get (input, NULL, &len);
+	char *data = r_socket_http_get (input, NULL, NULL, &len);
 	if (data) {
 		if (!r_file_dump (fname, (const ut8*)data, len, 0)) {
 			R_LOG_ERROR ("Cannot save file to disk");
@@ -2169,7 +2169,8 @@ repeat:
 						cmd_write_fail (core);
 					} else {
 						if (r_config_get_b (core->config, "scr.prompt")) { // maybe check interactive?
-							R_LOG_INFO ("Written %d byte(s) (%s) = wx %s @ 0x%08"PFMT64x, acode->len, input + 1, hex, core->offset);
+							const char *arg = r_str_trim_head_ro (input + 1);
+							R_LOG_INFO ("Written %d byte(s) (%s) = wx %s @ 0x%08"PFMT64x, acode->len, arg, hex, core->offset);
 						}
 						WSEEK (core, acode->len);
 					}
